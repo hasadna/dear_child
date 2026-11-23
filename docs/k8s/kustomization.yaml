@@ -1,0 +1,14 @@
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+
+namespace: dear-child
+
+commonLabels:
+  app.kubernetes.io/name: dear-child
+  app.kubernetes.io/part-of: hasadna
+  app.kubernetes.io/managed-by: argocd
+
+resources:
+  - deployment.yaml
+  - service-and-ingress.yaml
+  - jobs-migrate-and-etl.yaml

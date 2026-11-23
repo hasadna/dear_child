@@ -1,0 +1,93 @@
+apiVersion: v1
+kind: Secret
+metadata:
+  name: dear-child-secrets
+  namespace: dear-child
+  annotations:
+    # תבנית הזרקת סודות מ-HashiCorp Vault בקלאסטר הסדנא (hasadna-k8s / argocd-vault-plugin)
+    avp.kubernetes.io/path: "secret/data/hasadna/dear-child"
+type: Opaque
+stringData:
+  # חיבורי מסד הנתונים בהפרדת Roles קשיחה (docs/04_data_schema_v1.md)
+  DATABASE_PUBLIC_RO_URL: "<DATABASE_PUBLIC_RO_URL>"
+  DATABASE_BACKEND_WRITE_URL: "<DATABASE_BACKEND_WRITE_URL>"
+  DATABASE_ETL_URL: "<DATABASE_ETL_URL>"
+
+  # מפתחות HMAC-SHA256 ו-HKDF סודיים ונפרדים מה-DB (D-34, D-38)
+  # חובה לסובב/למחוק את SECRET_PEPPER ב-31 באוגוסט בתום כל שנת לימודים
+  SECRET_PEPPER: "<SECRET_PEPPER>"
+  QUOTA_PEPPER_SEPARATE: "<QUOTA_PEPPER_SEPARATE>"
+
+  # אימות Google OIDC (Scope: openid בלבד ללא email!) ו-Cloudflare Turnstile (D-29)
+  GOOGLE_CLIENT_ID: "<GOOGLE_CLIENT_ID>"
+  TURNSTILE_SECRET_KEY: "<TURNSTILE_SECRET_KEY>"
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: dear-child-app
+  namespace: dear-child
+  labels:
+    app: dear-child-app
+spec:
+  # תמיכה מלאה ב-Multi-Pod בזכות גזירת מפתח עוגייה דטרמיניסטי ב-HKDF מתוך SECRET_PEPPER (D-38)
+  replicas: 2
+  revisionHistoryLimit: 3
+  selector:
+    matchLabels:
+      app: dear-child-app
+  template:
+    metadata:
+      labels:
+        app: dear-child-app
+    spec:
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 1000
+        runAsGroup: 1000
+        fsGroup: 1000
+      containers:
+        - name: dear-child-app
+          image: ghcr.io/hasadna/dear_child:latest
+          imagePullPolicy: Always
+          ports:
+            - name: http
+              containerPort: 3000
+              protocol: TCP
+          env:
+            - name: NODE_ENV
+              value: "production"
+            - name: PORT
+              value: "3000"
+            - name: HOST
+              value: "0.0.0.0"
+            - name: ACTIVE_SCHOOL_YEAR
+              value: "2027"
+            - name: FRONTEND_STATIC_DIR
+              value: "/app/frontend/dist"
+          envFrom:
+            - secretRef:
+                name: dear-child-secrets
+          resources:
+            requests:
+              cpu: "150m"
+              memory: "256Mi"
+            limits:
+              cpu: "750m"
+              memory: "512Mi"
+          readinessProbe:
+            httpGet:
+              path: /api/v1/health
+              port: 3000
+            initialDelaySeconds: 5
+            periodSeconds: 10
+            timeoutSeconds: 3
+            failureThreshold: 3
+          livenessProbe:
+            httpGet:
+              path: /api/v1/health
+              port: 3000
+            initialDelaySeconds: 15
+            periodSeconds: 20
+            timeoutSeconds: 5
+            failureThreshold: 3

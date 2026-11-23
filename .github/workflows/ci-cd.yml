@@ -1,0 +1,81 @@
+name: CI/CD — Build, Test & Publish Container (hasadna-k8s)
+
+on:
+  push:
+    branches:
+      - main
+  pull_request:
+    branches:
+      - main
+
+permissions:
+  contents: read
+  packages: write
+
+jobs:
+  verify-and-test:
+    name: Backend Tests, Frontend Build & Naming Guardrail
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js 22
+        uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+
+      - name: Enforce Independent Naming Guardrail (D-36)
+        run: |
+          if grep -rnE "tafmap|mapathataf|מפת הטף" backend/src frontend/src frontend/index.html; then
+            echo "ERROR: Found forbidden external reference naming in source code (violates D-36)."
+            exit 1
+          fi
+          echo "Independent Naming Guardrail check passed (0 matches)."
+
+      - name: Install & Test Backend
+        working-directory: backend
+        run: |
+          npm install
+          npm test
+          npm run build
+
+      - name: Install & Build Frontend SPA
+        working-directory: frontend
+        run: |
+          npm install
+          npm run build
+
+  publish-image:
+    name: Build & Push Unified Docker Image to GHCR
+    needs: verify-and-test
+    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Log in to GitHub Container Registry (ghcr.io)
+        uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Extract Docker metadata & tags
+        id: meta
+        uses: docker/metadata-action@v5
+        with:
+          images: ghcr.io/${{ github.repository }}
+          tags: |
+            type=raw,value=latest
+            type=sha,prefix=sha-
+
+      - name: Build and push multi-stage production image
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          file: ./Dockerfile
+          push: true
+          tags: ${{ steps.meta.outputs.tags }}
+          labels: ${{ steps.meta.outputs.labels }}

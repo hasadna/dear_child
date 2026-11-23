@@ -84,6 +84,20 @@ export async function buildServer(
       root: staticDir,
       prefix: '/',
     });
+
+    app.setNotFoundHandler((request, reply) => {
+      if (
+        request.url.startsWith('/api/') ||
+        request.url.startsWith('/mcp')
+      ) {
+        reply.status(404).send({
+          error: 'NOT_FOUND',
+          message_he: 'נקודת הקצה המבוקשת לא נמצאה.',
+        });
+        return;
+      }
+      reply.sendFile('index.html');
+    });
   }
 
   return app;

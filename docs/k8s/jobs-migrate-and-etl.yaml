@@ -1,0 +1,106 @@
+# ==============================================================================
+# 1. Job להרצת מיגרציות SQL וטעינת מילוני ערים ותעריפים מפוקחים בעת פריסה (ArgoCD Sync Hook)
+# ==============================================================================
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: dear-child-db-migrate-and-seed
+  namespace: dear-child
+  annotations:
+    argocd.argoproj.io/hook: PreSync
+    argocd.argoproj.io/hook-delete-policy: BeforeHookCreation
+spec:
+  backoffLimit: 3
+  template:
+    spec:
+      restartPolicy: OnFailure
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 1000
+      containers:
+        - name: migrate-and-seed
+          image: ghcr.io/hasadna/dear_child:latest
+          command:
+            - /bin/sh
+            - -c
+            - "node dist/db/migrate.js && node dist/db/seed-dictionaries.js"
+          envFrom:
+            - secretRef:
+                name: dear-child-secrets
+---
+# ==============================================================================
+# 2. CronJob שבועי לסנכרון מאגרי הממשלה והרשויות המקומיות (ETL — ימי ראשון 02:00)
+#    רץ תחת הרשאת app_etl ולעולם אינו מוחק גנים פיזית (ON DELETE RESTRICT - D-38)
+# ==============================================================================
+apiVersion: batch/v1
+kind: CronJob
+metadata:
+  name: dear-child-weekly-official-etl
+  namespace: dear-child
+spec:
+  schedule: "0 2 * * 0"
+  concurrencyPolicy: Forbid
+  successfulJobsHistoryLimit: 3
+  failedJobsHistoryLimit: 3
+  jobTemplate:
+    spec:
+      backoffLimit: 2
+      template:
+        spec:
+          restartPolicy: OnFailure
+          securityContext:
+            runAsNonRoot: true
+            runAsUser: 1000
+          containers:
+            - name: etl-runner
+              image: ghcr.io/hasadna/dear_child:latest
+              command: ["node", "dist/etl/run-sync.js"]
+              envFrom:
+                - secretRef:
+                    name: dear-child-secrets
+              resources:
+                requests:
+                  cpu: "200m"
+                  memory: "384Mi"
+                limits:
+                  cpu: "1000m"
+                  memory: "768Mi"
+---
+# ==============================================================================
+# 3. CronJob שנתי (31 באוגוסט 03:00) לאיפוס dedup_token ומכסות בתום שנת הלימודים (D-34)
+#    מבטיח אנונימיזציה מוחלטת ובלתי הפיכה של דיווחי השנה שחלפה
+# ==============================================================================
+apiVersion: batch/v1
+kind: CronJob
+metadata:
+  name: dear-child-annual-privacy-nullifier-reset
+  namespace: dear-child
+spec:
+  schedule: "0 3 31 8 *"
+  concurrencyPolicy: Forbid
+  jobTemplate:
+    spec:
+      template:
+        spec:
+          restartPolicy: OnFailure
+          securityContext:
+            runAsNonRoot: true
+            runAsUser: 1000
+          containers:
+            - name: annual-privacy-reset
+              image: ghcr.io/hasadna/dear_child:latest
+              command:
+                - node
+                - -e
+                - |
+                  const pg = require('pg');
+                  (async () => {
+                    const pool = new pg.Pool({ connectionString: process.env.DATABASE_ETL_URL });
+                    await pool.query('UPDATE app_private.survey_submissions SET dedup_token = NULL WHERE school_year <= EXTRACT(YEAR FROM CURRENT_DATE)::SMALLINT;');
+                    await pool.query('TRUNCATE TABLE app_private.auth_rate_limits;');
+                    await pool.end();
+                    console.log('Annual D-34 privacy reset completed: dedup_token cleared and auth_rate_limits truncated.');
+                  })().catch((e) => { console.error(e); process.exit(1); });
+              envFrom:
+                - secretRef:
+                    name: dear-child-secrets
