@@ -105,7 +105,7 @@
   "items": [
     {
       "daycare_id": "a8f5c2d1-4e9b-4a12-9c81-7b3d2e1f0a99",
-      "tafmap_id": "c49a8b12",
+      "external_facility_id": "c49a8b12",
       "moe_symbol": "410923",
       "display_name": "מעון יום כוכב הצפון",
       "city_code": 5000,
@@ -173,7 +173,7 @@
   },
   "daycare": {
     "daycare_id": "a8f5c2d1-4e9b-4a12-9c81-7b3d2e1f0a99",
-    "tafmap_id": "c49a8b12",
+    "external_facility_id": "c49a8b12",
     "moe_symbol": "410923",
     "mol_symbol": null,
     "display_name": "מעון יום כוכב הצפון",

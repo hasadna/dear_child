@@ -194,7 +194,7 @@ CREATE TABLE public.cities (
     city_code           INTEGER PRIMARY KEY,                    -- סמל יישוב למ"ס (למשל 5000 לתל אביב-יפו, 3000 לירושלים)
     city_name_he        TEXT NOT NULL UNIQUE,                   -- שם יישוב תקני בעברית
     city_name_norm      TEXT NOT NULL,                          -- שם מנורמל לחיפוש (ללא מקפים/רווחים כפולים)
-    tafmap_workspace    TEXT,                                   -- מזהה workspace במפת הטף אם קיים (למשל 'rkhobot', 'tlv')
+    workspace_slug      TEXT,                                   -- מזהה מרחב עירוני אם קיים (למשל 'rkhobot', 'tlv')
     district_he         TEXT,                                   -- מחוז
     socio_economic_cluster SMALLINT CHECK (socio_economic_cluster BETWEEN 1 AND 10), -- אשכול חברתי-כלכלי למ"ס (לסיבסוד ניצנים)
     children_age_0_5    INTEGER CHECK (children_age_0_5 >= 0),  -- מספר ילדים בגילאי 0-5 (ממאגר רשות האוכלוסין)
@@ -270,8 +270,8 @@ CREATE TABLE public.regulated_tuition_benchmarks (
 CREATE TABLE public.daycares (
     daycare_id              UUID PRIMARY KEY DEFAULT gen_random_uuid(),
     
-    -- מזהים רשמיים חיצוניים (לסינכרון דטרמיניסטי מול מפת הטף ומאגרי הממשלה - D-36)
-    tafmap_id               TEXT UNIQUE,                        -- מזהה מפת הטף (למשל md5(_id)[:8] או _id מ-facilities.csv)
+    -- מזהים רשמיים חיצוניים (לסינכרון דטרמיניסטי ואיחוד ישויות היררכי - D-36, D-38)
+    external_facility_id    TEXT UNIQUE,                        -- מזהה מסגרת מאוחד (למשל md5(_id)[:8] או _id מ-facilities.csv)
     obudget_facility_id     TEXT UNIQUE,                        -- מזהה המסגרת ב-next.obudget.org/datapackages/facilities/all
     moe_symbol              TEXT,                               -- סמל מוסד / סמל מעון במשרד החינוך (GetMeonot / mosdot_edu)
     mol_symbol              TEXT,                               -- סמל מעון / משפחתון במשרד העבודה (daycare-centers)

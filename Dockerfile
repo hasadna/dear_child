@@ -35,6 +35,7 @@ ENV FRONTEND_STATIC_DIR=/app/frontend/dist
 COPY --from=backend-builder /app/backend/package.json ./package.json
 COPY --from=backend-builder /app/backend/node_modules ./node_modules
 COPY --from=backend-builder /app/backend/dist ./dist
+COPY --from=backend-builder /app/backend/src/db/migrations ./dist/db/migrations
 COPY --from=frontend-builder /app/frontend/dist /app/frontend/dist
 
 USER node
