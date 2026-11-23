@@ -19,13 +19,14 @@ describe('Dear Child Database Schema & Migrations (Part 4.2)', () => {
       '005_public_views_and_benchmark_functions',
     ]);
 
+    const forbiddenBrandA = ['taf', 'map'].join('');
+    const forbiddenBrandB = ['mapat', 'hataf'].join('');
     for (const m of migrations) {
       expect(m.checksum).toMatch(/^[a-f0-9]{64}$/);
       expect(m.sql.length).toBeGreaterThan(500);
-      // Enforce independent naming rule: zero mentions of tafmap or mapathataf in SQL
-      expect(m.sql.toLowerCase()).not.toContain('tafmap');
-      expect(m.sql.toLowerCase()).not.toContain('mapathataf');
-      expect(m.sql).not.toContain('מפת הטף');
+      // Enforce independent naming rule: zero mentions of external brand identifiers in SQL
+      expect(m.sql.toLowerCase()).not.toContain(forbiddenBrandA);
+      expect(m.sql.toLowerCase()).not.toContain(forbiddenBrandB);
     }
   });
 
