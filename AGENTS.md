@@ -19,18 +19,17 @@
 4. **מבנה מסודר וקריא:** שימוש בכותרות ברורות, טבלאות השוואה, רשימות תבליטים קצרות והדגשת שורות תחתונות.
 5. **חשיבה ביקורתית וייעוץ פרואקטיבי:** תפקידך אינו רק לבצע פקודות, אלא **לאתגר הנחות, להצביע על מוקשים (משפטיים, מוצריים, טכניים), להציע חלופות ולשאול שאלות מכוונות** כשיש אי-ודאות. אל תנחש כוונות כשנדרשת החלטה מהותית — שאל.
 6. **שקיפות לגבי חסימות:** אם קישור, מאגר, API או מסמך חסומים (`401`/`403`/`404`/Captcha) — דווח על כך במדויק ובקש עזרה או הרשאה מהמשתמש במקום להמציא או להניח מה כתוב שם.
-7. **שמירה על שורש תיקייה נקי (Clean Root):** בשורש הפרויקט יושבים רק `README.md`, `AGENTS.md` והתיקיות הראשיות (`docs/`, `research/`, `references/`). חומרי גלם ומסמכי מקור נשמרים תחת `references/`.
+7. **שמירה על שורש תיקייה נקי (Clean Root):** בשורש הפרויקט יושבים רק קובצי התצורה והתיעוד הראשיים (`README.md`, `AGENTS.md`, `Dockerfile`, `docker-compose.yml`, `.env.example`) והתיקיות הראשיות (`backend/`, `frontend/`, `docs/`, `research/`, `references/`). חומרי גלם ומסמכי מקור נשמרים תחת `references/`.
 
 ---
 
 ## 2. סטטוס ושלב נוכחי בפרויקט (Phase Guardrails)
 
-- **השלב הנוכחי:** **מחקר, הבנה, איפיון ותכנון ארכיטקטוני בלבד (Discovery & Planning).**
-- **אסור כרגע (עד להנחיה מפורשת מהמשתמש):**
-  - לא להתחיל לפתח קוד אפליקציה (Frontend/Backend) או להקים שרתים/DB בענן.
-  - לא לדחוף שינויים לריפוזיטוריז חיצוניים של הסדנא (`mapathataf` וכו').
-- **מה כן עושים בשלב זה:** איסוף וניתוח מקורות מידע, בדיקת היתכנות מול APIs אמיתיים, בדיקת חקיקה/רישוי ופרטיות, שמירת דגימות דאטה קטנות ב-`research/samples/`, תיעוד מסודר של ממצאים ב-`research/`, ותיעוד החלטות ואיפיון ב-`docs/`.
-- **שער מעבר לשלב הביצוע (חובת `/grill-me`):** כאשר נסיים את שלב ההבנה והניתוח ונרצה להתקדם לביצוע — **חובה שהמשתמש ינחה על ביצוע סשן `/grill-me` (ראיון עומק ביקורתי)** כדי לאתגר, לחדד ולנעול סופית את כל החלטות האיפיון, הארכיטקטורה והגבולות המשפטיים לפני כתיבת שורת קוד אחת. אין לדלג על שער זה.
+- **השלב הנוכחי:** **שלב 4 — פיתוח ומימוש `MVP1` (לאחר השלמת שלבים 1–2 ונעילת שער הביקורת `/grill-me` בשלב 3 תחת `D-38`).**
+- **כללי ברזל למימוש בשלב 4:**
+  - **שימוש חוזר בקוד ובעיצוב של "מפת הטף" תחת שמות ומיתוג עצמאיים לחלוטין (`D-36`, נוהל מחייב):** אנו מאמצים ומעתיקים רכיבי UI, אייקונים, פלטת צבעים (`--color-night: #053856`, `--color-green-100: #97D6BE`), סרגל חיפוש ופילטרים, טבלה נגישה ולוגיקת פענוח מסגרות מתוך `hasadna/mapathataf`, **אך חל איסור מוחלט להשתמש בשמות `tafmap`, `mapathataf` או `"מפת הטף"` בשמות קבצים, תיקיות, רכיבים, מחלקות CSS, פונקציות, משתנים, הערות קוד או טקסטים בממשק המשתמש של הריפו שלנו**. כל מה שנלקח משם מקבל שם עצמאי ומותאם ל"ילדי היקר" (למשל: `frontend/public/icons/`, `frontend/src/styles/theme.css`, `frontend/src/components/shell/AppHeader.tsx`, `FiltersBar.tsx`, `DaycareListTable.tsx`, `OnboardingModal.tsx`, ו-`backend/src/etl/facilities-resolver.ts` עם `resolveFacilityItem`).
+  - **אסור לדחוף שינויים לריפוזיטוריז חיצוניים של הסדנא (`mapathataf` וכו')** — הפיתוח מתבצע אך ורק בריפו העצמאי שלנו (`hasadna/dear_child`).
+  - **שמירה מוחלטת על גבולות `MVP1` (`D-28`, `D-34`, `D-38`):** מסגרות רשמיות בלבד (`is_official_source = TRUE`) + פיילוט גיליון ת"א לגנים המצטלבים בלבד, אימות `Google OIDC (Scope: openid)` + עוגייה מוצפנת ב-`HKDF` + `Turnstile`, ו-`Blind Upsert` / `Blind Withdraw` ללא שום שמירת מייל או ת"ז של יחידים.
 
 ---
 
@@ -126,6 +125,9 @@
 - `docs/04_data_schema_v1.md` — איפיון מיקרו חלק א': סכמת מסד הנתונים (`PostgreSQL 17 + PostGIS + pg_trgm`), הפרדת `public`/`app_private`, `Unlinkable Nullifiers`, `Blind Upsert`, אגרגציות ו-ETL.
 - `docs/05_api_and_mcp_specification.md` — איפיון מיקרו חלק ב': מפרט ה-REST API (`OpenAPI 3.1.0`), אימות `Google OIDC` (`Scope: openid`), `Sanity Check`, ייצוא ושרת ה-MCP (`yaldi-hayakar-mcp`).
 - `docs/06_ui_ux_and_cartography_spec.md` — איפיון מיקרו חלק ג': מסכי המשתמש, אימוץ רכיבי מעטפת מ"מפת הטף", קרטוגרפיה (`Supercluster` ו-`Price Pills`), כרטיס הגן, טופס דיווח הורים ונגישות (`ת"י 5568 AA`).
+- `backend/` — שרת ה-Backend (`Node.js / TypeScript + Fastify`), הפרדת Pools ל-Postgres (`roPool` / `writePool`), גזירת `Unlinkable Nullifiers` והצפנת עוגיות ב-`HKDF`, מנגנון איחוד ופענוח מסגרות (`facilities-resolver.ts` עם `resolveFacilityItem`), שרת ה-MCP (`/mcp`) ומשימות ה-ETL.
+- `frontend/` — אפליקציית ה-Frontend (`React 19 + TypeScript + Vite`), הכוללת את מערכת העיצוב (`src/styles/theme.css`), האייקונים (`public/icons/`) ורכיבי המעטפת (`AppHeader`, `FiltersBar`, `DaycareListTable`, `OnboardingModal` תחת `src/components/shell/`).
+- `Dockerfile` ו-`docker-compose.yml` — תשתית הקונטיינרים המאוחדת ל-`hasadna-k8s` (`D-38`) וסביבת `PostgreSQL 17 + PostGIS 3.4` מקומית.
 - `references/original-materials/` — חומרי המקור שסופקו בתחילת הפרויקט (`ילדי היקר.docx` ו-`Talpiot 4 Good - Hackathon Results.html`, שמורים מקומית).
 - `references/gan-ster-bundle/` — גיבוי מקומי של קוד הפרונטאנד החי מההאקתון (`gan-ster.vercel.app`).
 - `references/repos/gan-ster/` — שכפול מקומי מלא של ריפו קוד ההאקתון (`gan-ster`), כולל ה-Frontend, ה-Supabase Edge Function ו-15 מיגרציות ה-SQL.

@@ -1,0 +1,702 @@
+/* ==========================================================================
+   מערכת העיצוב של פרויקט "ילדי היקר" (Dear Child / Yaldi HaYakar)
+   ========================================================================== */
+
+:root {
+  --color-white: #ffffff;
+  --color-gray-1: #e8e5e6;
+  --color-gray-2: #9c999a;
+  --color-gray-3: #7a7a7a;
+  --color-gray-4: #4a4a4a;
+  --color-black: #000000;
+
+  --color-night: #053856;
+  --color-text: #383838;
+
+  --color-green-50: #eaf5e9;
+  --color-green-100: #97d6be;
+  --color-green-200: #78bc9a;
+  --color-green-300: #1aa23e;
+  --color-green-400: #64b883;
+  --color-green-500: #204e37;
+
+  --color-d-tara: #b8390f;
+  --color-medium-orange: #ef703c;
+  --color-m-tree: #848c43;
+  --color-l-sun: #ffb812;
+  --color-l-nude: #e4a28f;
+  --color-off-white: #f0ebe9;
+  --color-grey-200: #d1cfcf;
+  --color-pinky: #fd1268;
+
+  --button-shadow: 0px 4px 24px rgba(0, 0, 0, 0.25);
+  --mobile-threshold: 1024px;
+}
+
+html,
+body,
+#root {
+  margin: 0;
+  padding: 0;
+  width: 100%;
+  height: 100%;
+  box-sizing: border-box;
+  overscroll-behavior: none;
+  overflow: hidden;
+  direction: rtl;
+  font-family: 'Noto Sans Hebrew', 'Heebo', sans-serif;
+  color: var(--color-text);
+  background-color: var(--color-off-white);
+}
+
+*,
+*:before,
+*:after {
+  box-sizing: inherit;
+}
+
+h1,
+h2,
+h3,
+h4,
+h5,
+h6,
+p {
+  margin: 0;
+}
+
+a,
+a:visited,
+a:hover {
+  color: inherit;
+  text-decoration: none;
+}
+
+.font-sans {
+  font-family: 'Heebo', 'Noto Sans Hebrew', sans-serif;
+  font-weight: 400;
+}
+
+.bg-contain-center {
+  background-repeat: no-repeat;
+  background-position: center;
+  background-size: contain;
+}
+
+/* ==========================================================================
+   1. Header & Slide-Down Menu Drawer
+   ========================================================================== */
+.app-header {
+  width: 100%;
+  display: flex;
+  flex-direction: row;
+  align-items: center;
+  justify-content: center;
+  height: 66px;
+  padding: 12px 16px;
+  gap: 10px;
+  background: var(--color-white);
+  position: relative;
+  z-index: 1000;
+  border-bottom: 1px solid var(--color-gray-1);
+}
+
+.app-header .header-container {
+  max-width: 1440px;
+  width: 100%;
+  display: flex;
+  flex-direction: row;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.app-header .menu-button {
+  flex: 0 0 auto;
+  width: 34px;
+  height: 38px;
+  border: none;
+  background-color: transparent;
+  background-image: url('/icons/icon-menu.svg');
+  background-repeat: no-repeat;
+  background-position: center;
+  background-size: contain;
+  cursor: pointer;
+}
+
+.app-header .brand-area {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+
+.app-header .brand-logo {
+  width: 36px;
+  height: 38px;
+  background-image: url('/icons/logo-header.svg');
+  background-repeat: no-repeat;
+  background-position: center;
+  background-size: contain;
+}
+
+.app-header .brand-titles {
+  display: flex;
+  flex-direction: column;
+}
+
+.app-header .brand-title {
+  font-size: 18px;
+  font-weight: 700;
+  color: var(--color-night);
+  line-height: 1.1;
+}
+
+.app-header .brand-subtitle {
+  font-size: 11px;
+  color: var(--color-gray-4);
+}
+
+.app-header .sections {
+  display: flex;
+  flex-flow: row nowrap;
+  align-items: center;
+  justify-content: flex-start;
+  gap: 8px;
+  flex: 1 1 auto;
+  overflow-x: auto;
+}
+
+.app-header .section-pill {
+  text-align: right;
+  font-size: 12px;
+  font-weight: 500;
+  border: 1px solid var(--color-green-100);
+  background-color: var(--color-green-50);
+  border-radius: 30px;
+  padding: 5px 14px;
+  color: var(--color-night);
+  cursor: pointer;
+  white-space: nowrap;
+  transition: background-color 0.2s ease;
+}
+
+.app-header .section-pill.selected {
+  background-color: var(--color-green-100);
+  font-weight: 700;
+}
+
+.app-header .cta-report-btn {
+  flex: 0 0 auto;
+  background-color: var(--color-night);
+  color: var(--color-white);
+  border: none;
+  border-radius: 24px;
+  padding: 8px 16px;
+  font-size: 13px;
+  font-weight: 600;
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  box-shadow: 0 2px 6px rgba(5, 56, 86, 0.2);
+}
+
+.app-header .cta-report-btn:hover {
+  background-color: #074b73;
+}
+
+.app-menu-drawer {
+  position: absolute;
+  width: 100%;
+  max-width: 520px;
+  top: 0;
+  right: 0;
+  transform: translateY(-120%);
+  transition: transform 0.3s ease-in-out;
+  background-color: var(--color-white);
+  padding: 64px 32px 28px;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  box-shadow: 0px 4px 14px rgba(0, 0, 0, 0.25);
+  border-radius: 0px 0px 20px 20px;
+  z-index: 1100;
+}
+
+.app-menu-drawer.active {
+  transform: translateY(0);
+}
+
+.app-menu-drawer a,
+.app-menu-drawer button.menu-link {
+  min-height: 48px;
+  width: 100%;
+  display: flex;
+  flex-flow: row nowrap;
+  align-items: center;
+  justify-content: flex-start;
+  padding: 10px 14px;
+  font-weight: 500;
+  font-size: 15px;
+  color: var(--color-night);
+  background: var(--color-white);
+  border-radius: 4px;
+  border: 1px solid var(--color-night);
+  cursor: pointer;
+  text-align: right;
+}
+
+.app-menu-drawer a.external {
+  padding-right: 40px;
+  background-repeat: no-repeat;
+  background-size: 20px;
+  background-position: right 10px center;
+  background-image: url('/icons/icon-link.svg');
+}
+
+.app-menu-drawer .close-btn {
+  position: absolute;
+  top: 14px;
+  right: 16px;
+  width: 30px;
+  height: 38px;
+  border: none;
+  background-color: transparent;
+  background-repeat: no-repeat;
+  background-position: center;
+  background-size: contain;
+  background-image: url('/icons/icon-menu-close.svg');
+  cursor: pointer;
+}
+
+/* ==========================================================================
+   2. Filters Bar & Filter Dialog
+   ========================================================================== */
+.app-filters-wrapper {
+  width: 100%;
+  z-index: 20;
+}
+
+.app-search-bar {
+  display: flex;
+  flex-flow: row nowrap;
+  align-items: center;
+  justify-content: flex-start;
+  gap: 12px;
+  width: 100%;
+  height: 58px;
+  padding: 0 14px;
+  background-color: var(--color-white);
+  border-radius: 0px 0px 20px 20px;
+  box-shadow: 0px 4px 6px 0px rgba(0, 0, 0, 0.14);
+  position: relative;
+  z-index: 2;
+}
+
+.app-search-bar .filter-icon-btn {
+  width: 34px;
+  height: 34px;
+  border: none;
+  background-color: transparent;
+  background-repeat: no-repeat;
+  background-position: center;
+  background-size: contain;
+  background-image: url('/icons/icon-filter.svg');
+  position: relative;
+  cursor: pointer;
+  flex: 0 0 auto;
+}
+
+.app-search-bar .filter-icon-btn .count {
+  width: 20px;
+  height: 20px;
+  position: absolute;
+  top: -4px;
+  right: -4px;
+  background-color: var(--color-pinky);
+  color: var(--color-white);
+  font-size: 12px;
+  font-weight: 600;
+  border-radius: 10px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.app-search-bar .input-container {
+  position: relative;
+  flex: 1 1 auto;
+  width: 100%;
+}
+
+.app-search-bar .input-container input {
+  width: 100%;
+  height: 38px;
+  border-radius: 20px;
+  border: 1px solid var(--color-text);
+  padding: 0 14px;
+  padding-right: 40px;
+  font-size: 15px;
+  background-repeat: no-repeat;
+  background-image: url('/icons/icon-search.svg');
+  background-position: center right 12px;
+  background-size: 20px;
+}
+
+.app-filters-tab {
+  display: flex;
+  flex-direction: column;
+  width: 100%;
+  background-color: var(--color-white);
+  border-radius: 0px 0px 20px 20px;
+  padding: 10px 14px;
+  box-shadow: 0px 4px 6px 0px rgba(0, 0, 0, 0.12);
+}
+
+.app-filters-tab .filter-row {
+  display: flex;
+  flex-flow: row nowrap;
+  overflow-x: auto;
+  align-items: center;
+  gap: 10px;
+}
+
+.app-filters-tab .filter-selector {
+  height: 34px;
+  padding: 0 12px;
+  padding-left: 34px;
+  min-width: 96px;
+  border-radius: 6px;
+  border: none;
+  display: flex;
+  align-items: center;
+  color: var(--color-night);
+  font-size: 13px;
+  font-weight: 500;
+  background-color: var(--color-gray-1);
+  background-repeat: no-repeat;
+  background-position: center left 10px;
+  background-size: 10px;
+  background-image: url('/icons/icon-chevron-down-night.svg');
+  cursor: pointer;
+  white-space: nowrap;
+}
+
+.app-filters-tab .filter-selector.active {
+  background-color: var(--color-green-100);
+  font-weight: 700;
+}
+
+/* Filter Dialog Modal */
+.app-dialog-overlay {
+  position: fixed;
+  top: 0;
+  left: 0;
+  width: 100%;
+  height: 100%;
+  z-index: 1200;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background-color: rgba(0, 0, 0, 0.5);
+}
+
+.app-dialog-container {
+  position: relative;
+  width: min(440px, calc(100% - 48px));
+  background-color: var(--color-white);
+  border-radius: 16px;
+  display: flex;
+  flex-direction: column;
+  box-shadow: 0 10px 30px rgba(0, 0, 0, 0.25);
+}
+
+.app-dialog-container .dialog-header {
+  padding: 16px 24px 8px;
+  font-size: 17px;
+  font-weight: 700;
+  color: var(--color-night);
+  border-bottom: 1px solid var(--color-gray-1);
+}
+
+.app-dialog-container .options {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  padding: 16px 24px;
+}
+
+.app-dialog-container .option {
+  display: flex;
+  flex-flow: row nowrap;
+  align-items: center;
+  gap: 10px;
+  cursor: pointer;
+}
+
+.app-dialog-container .option .icon {
+  flex: 0 0 auto;
+  width: 22px;
+  height: 22px;
+  border-radius: 6px;
+  border: 2px solid var(--color-night);
+}
+
+.app-dialog-container .option .icon.checked {
+  background-color: var(--color-night);
+  background-repeat: no-repeat;
+  background-position: center;
+  background-size: 14px;
+  background-image: url('/icons/icon-check-white.svg');
+}
+
+.app-dialog-container .controls {
+  display: flex;
+  flex-flow: row nowrap;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 8px;
+  padding: 14px 20px;
+  border-top: 1px solid var(--color-gray-1);
+}
+
+.app-dialog-container .controls .clear-btn,
+.app-dialog-container .controls .save-btn {
+  padding: 6px 16px;
+  border-radius: 8px;
+  border: none;
+  font-size: 15px;
+  cursor: pointer;
+}
+
+.app-dialog-container .controls .clear-btn {
+  background-color: var(--color-gray-1);
+  color: var(--color-gray-4);
+}
+
+.app-dialog-container .controls .save-btn {
+  background-color: var(--color-green-300);
+  color: var(--color-white);
+  font-weight: 600;
+}
+
+/* ==========================================================================
+   3. Desktop Split-View & Item List Table
+   ========================================================================== */
+.main-workspace {
+  display: flex;
+  flex-direction: column;
+  width: 100%;
+  height: calc(100vh - 66px);
+  overflow: hidden;
+}
+
+.split-view-grid {
+  display: grid;
+  grid-template-columns: 46% 54%;
+  width: 100%;
+  flex: 1 1 auto;
+  overflow: hidden;
+}
+
+@media (max-width: 1023px) {
+  .split-view-grid {
+    grid-template-columns: 1fr;
+  }
+}
+
+.app-item-list-container {
+  display: flex;
+  flex-direction: column;
+  width: 100%;
+  height: 100%;
+  background: var(--color-white);
+  border-left: 1px solid var(--color-gray-1);
+  overflow: hidden;
+}
+
+.app-item-list-container .area-summary-bar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 10px 16px;
+  background-color: var(--color-green-50);
+  border-bottom: 1px solid var(--color-green-100);
+  font-size: 13px;
+  color: var(--color-night);
+}
+
+.app-item-list-container .export-btn {
+  background-color: var(--color-white);
+  color: var(--color-night);
+  border: 1px solid var(--color-night);
+  border-radius: 16px;
+  padding: 4px 12px;
+  font-size: 12px;
+  font-weight: 600;
+  cursor: pointer;
+}
+
+.app-table-scroll {
+  flex: 1 1 auto;
+  overflow-y: auto;
+  width: 100%;
+}
+
+.app-table {
+  width: 100%;
+  border-collapse: collapse;
+}
+
+.app-table thead {
+  background-color: var(--color-white);
+  position: sticky;
+  top: 0;
+  z-index: 2;
+  box-shadow: 0px 4px 4px rgba(0, 0, 0, 0.05);
+}
+
+.app-table thead tr th,
+.app-table tbody tr td {
+  padding: 8px 10px;
+  font-size: 14px;
+  text-align: right;
+  color: var(--color-night);
+}
+
+.app-table thead tr th {
+  color: var(--color-gray-3);
+  font-weight: 600;
+}
+
+.app-table thead tr th .total-tag {
+  width: fit-content;
+  display: inline-flex;
+  padding: 3px 8px;
+  border-radius: 4px;
+  background: var(--color-night);
+  color: var(--color-white);
+  font-size: 13px;
+  font-weight: 700;
+}
+
+.app-table tbody tr.item-row {
+  cursor: pointer;
+  border-bottom: 1px solid var(--color-gray-1);
+}
+
+.app-table tbody tr.item-row:hover {
+  background-color: rgba(151, 214, 190, 0.15);
+}
+
+.app-table tbody tr.item-row.active {
+  background-color: rgba(151, 214, 190, 0.3);
+}
+
+.app-table .toggle-circle {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 24px;
+  height: 24px;
+  border-radius: 50%;
+  background: var(--color-gray-1);
+  transition: transform 0.25s ease-in-out;
+  transform: rotate(180deg);
+}
+
+.app-table tr.active .toggle-circle {
+  transform: rotate(0deg);
+}
+
+.app-table .licensing-icon {
+  display: inline-block;
+  width: 20px;
+  height: 20px;
+  background-repeat: no-repeat;
+  background-position: center;
+  background-size: 20px;
+}
+
+.app-table .licensing-icon.valid {
+  background-image: url('/icons/icon-licensing-valid.svg');
+}
+.app-table .licensing-icon.in_progress {
+  background-image: url('/icons/icon-licensing-in-progress.svg');
+}
+.app-table .licensing-icon.did_not_apply {
+  background-image: url('/icons/icon-licensing-did-not-apply.svg');
+}
+.app-table .licensing-icon.none {
+  background-image: url('/icons/icon-licensing-none.svg');
+}
+
+/* Inline Details Panel inside Table Row */
+.app-details-box {
+  background-color: #fafcfb;
+  border-bottom: 2px solid var(--color-green-100);
+}
+
+.app-details-box .inner-fields {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  padding: 12px 20px;
+}
+
+.app-details-box .detail-row {
+  display: flex;
+  align-items: center;
+  color: var(--color-night);
+  font-size: 14px;
+  padding-right: 28px;
+  min-height: 28px;
+  position: relative;
+}
+
+.app-details-box .detail-row i.field-icon {
+  position: absolute;
+  right: 0;
+  top: 50%;
+  transform: translateY(-50%);
+  width: 20px;
+  height: 16px;
+  border-radius: 8px;
+  background-color: var(--color-gray-1);
+  background-repeat: no-repeat;
+  background-position: center;
+  background-size: 12px;
+}
+
+.app-details-box .bookend {
+  display: flex;
+  flex-flow: row wrap;
+  width: 100%;
+  padding: 10px 20px;
+  justify-content: center;
+  align-items: center;
+  gap: 12px;
+  border-radius: 0px 0px 16px 16px;
+  background: var(--color-gray-1);
+}
+
+.app-details-box .bookend .bookend-btn {
+  display: flex;
+  height: 34px;
+  padding: 6px 16px;
+  justify-content: center;
+  align-items: center;
+  flex: 1 1 auto;
+  border-radius: 24px;
+  border: 1px solid var(--color-night);
+  background-color: var(--color-white);
+  color: var(--color-night);
+  font-size: 13px;
+  font-weight: 600;
+  cursor: pointer;
+}
+
+.app-details-box .bookend .bookend-btn.primary {
+  background-color: var(--color-night);
+  color: var(--color-white);
+}

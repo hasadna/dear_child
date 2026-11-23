@@ -5,7 +5,7 @@
 > **ארגון גג:** [הסדנא לידע ציבורי (ע"ר)](https://www.hasadna.org.il/)  
 > **מקור הפרויקט:** האקתון [Talpiot 4 Good](https://talpiot4good.hasadna.org.il/) (פורום בוגרי תלפיות × הסדנא לידע ציבורי, 2026)  
 > **שותף ולקוח אסטרטגי:** **ועד ההורים הארצי (הנהגת ההורים הארצית)**  
-> **שלב נוכחי:** מחקר, הבנת הקיים, מיפוי דאטה וחקיקה, ותכנון ארכיטקטוני (טרום פיתוח).
+> **שלב נוכחי:** שלב 4 — פיתוח ומימוש `MVP1` (לאחר השלמת המחקר, איפיון המיקרו ונעילת `/grill-me` ב-`D-38`).
 
 ---
 
@@ -40,7 +40,12 @@
 - [`research/06_data_sources_terms_of_use_audit.md`](./research/06_data_sources_terms_of_use_audit.md) — ביקורת תנאי שימוש ורישיונות של כלל אתרי ומאגרי המקור + נוהל בדיקה מחייב לכל מקור מידע עתידי (`D-25`).
 - `research/samples/` — דגימות דאטה אמיתיות (`gov/`, `municipal/`, `community/`, `tafmap/`, `licensing/` — שמורות מקומית ומוחרגות מ-Git מטעמי פרטיות).
 
-### 4. חומרי מקור וגיבויים לוקאליים (`references/` — מוחרגים מ-Git)
+### 4. קוד המערכת ותשתית הקונטיינרים (`MVP1`)
+- [`backend/`](./backend/) — שרת `Node.js / TypeScript (Fastify)`: הפרדת `roPool` (`app_public_ro`) ו-`writePool` (`app_backend_write`), מנגנון `Unlinkable Nullifiers` + עוגיית סשן מוצפנת ב-`HKDF`, לוגיקת `resolveFacilityItem` וקליינט סנכרון מסגרות (`facilities-resolver.ts`), נקודות קצה `/api/v1/*` ו-`/mcp` (`yaldi-hayakar-mcp`).
+- [`frontend/`](./frontend/) — ממשק משתמש `React 19 + TypeScript + Vite` הכולל את מערכת העיצוב (`src/styles/theme.css`), האייקונים (`public/icons/`) ורכיבי המעטפת (`AppHeader`, `FiltersBar`, `DaycareListTable`, `OnboardingModal` תחת `src/components/shell/`).
+- [`Dockerfile`](./Dockerfile) ו-[`docker-compose.yml`](./docker-compose.yml) — בנייה רב-שלבית לקונטיינר מאוחד עבור `hasadna-k8s` (`D-38`) וסביבת פיתוח מקומית עם `PostgreSQL 17 + PostGIS 3.4`.
+
+### 5. חומרי מקור וגיבויים לוקאליים (`references/` — מוחרגים מ-Git)
 - `references/original-materials/` — הקבצים המקוריים שהתקבלו עם הפרויקט (`ילדי היקר.docx` ו-`Talpiot 4 Good - Hackathon Results.html`).
 - `references/gan-ster-bundle/` — גיבוי מקומי מלא של קוד ה-Frontend מהאפליקציה החיה של ההאקתון (`gan-ster.vercel.app`).
 - `references/repos/gan-ster/` — שכפול מקומי מלא של ריפו קוד ההאקתון (`gan-ster`), כולל ה-Backend ו-15 מיגרציות ה-SQL.

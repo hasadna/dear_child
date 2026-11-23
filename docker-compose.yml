@@ -1,0 +1,42 @@
+services:
+  db:
+    image: postgis/postgis:17-3.4-alpine
+    container_name: dear-child-postgis
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: postgres_dev_password
+      POSTGRES_DB: dear_child
+    ports:
+      - "5432:5432"
+    volumes:
+      - dear_child_pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U postgres -d dear_child"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+  app:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: dear-child-app
+    restart: unless-stopped
+    depends_on:
+      db:
+        condition: service_healthy
+    ports:
+      - "3000:3000"
+    environment:
+      NODE_ENV: development
+      PORT: 3000
+      ACTIVE_SCHOOL_YEAR: 2027
+      DATABASE_PUBLIC_RO_URL: postgresql://postgres:postgres_dev_password@db:5432/dear_child
+      DATABASE_BACKEND_WRITE_URL: postgresql://postgres:postgres_dev_password@db:5432/dear_child
+      DATABASE_ETL_URL: postgresql://postgres:postgres_dev_password@db:5432/dear_child
+      SECRET_PEPPER: dev-only-secret-pepper-replace-in-hasadna-vault
+      QUOTA_PEPPER_SEPARATE: dev-only-quota-pepper-replace-in-hasadna-vault
+
+volumes:
+  dear_child_pgdata:
