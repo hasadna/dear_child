@@ -1,44 +1,31 @@
 import React from 'react';
-
-export interface DaycareTableItem {
-  id: string;
-  name: string;
-  cityNameHe: string;
-  address: string;
-  ageGroupLabel: string;
-  subsidized: boolean;
-  licenseStatusCode: 'valid' | 'in_progress' | 'did_not_apply' | 'none';
-  licenseStatusText: string;
-  symbolText?: string;
-  ownerKind?: 'municipal' | 'private' | 'national';
-  activityHours?: string;
-  phone?: string;
-  priceFormattedHeader: string;
-  priceTrustBadge: string;
-  reportsCount: number;
-  yoyTrendText?: string;
-  benchmarkNeighborhoodText?: string;
-  regulatoryContextHe: string;
-}
+import { DaycareDetailDto } from '../../services/api-client';
 
 interface DaycareListTableProps {
-  items: DaycareTableItem[];
+  items: DaycareDetailDto[];
   selectedId: string | null;
+  hoveredId: string | null;
   cityMedianPriceNis: number;
   onSelectId: (id: string | null) => void;
-  onReportForDaycare: (daycare: DaycareTableItem) => void;
-  onFlagErrorForDaycare: (daycare: DaycareTableItem) => void;
+  onHoverId: (id: string | null) => void;
+  onOpenFullProfile: (daycare: DaycareDetailDto) => void;
+  onReportForDaycare: (daycare: DaycareDetailDto) => void;
+  onFlagErrorForDaycare: (daycare: DaycareDetailDto) => void;
   onExportCsv: () => void;
 }
 
 /**
- * טבלת המסגרות הנגישה (ת"י 5568 AA) וכרטיס הפרטים הנפתח של "ילדי היקר"
+ * טבלת המסגרות הנגישה (ת"י 5568 AA) וכרטיס הפרטים המהיר של "ילדי היקר"
+ * מסונכרנת דו-כיוונית עם סיכות המפה (Hover & Click) וכוללת פתיחת כרטיס גן מלא ב-5 בלוקים.
  */
 export const DaycareListTable: React.FC<DaycareListTableProps> = ({
   items,
   selectedId,
+  hoveredId,
   cityMedianPriceNis,
   onSelectId,
+  onHoverId,
+  onOpenFullProfile,
   onReportForDaycare,
   onFlagErrorForDaycare,
   onExportCsv,
@@ -77,10 +64,15 @@ export const DaycareListTable: React.FC<DaycareListTableProps> = ({
           <tbody>
             {items.map((item) => {
               const isSelected = selectedId === item.id;
+              const isHovered = hoveredId === item.id;
               return (
                 <React.Fragment key={item.id}>
                   <tr
-                    className={`item-row ${isSelected ? 'active' : ''}`}
+                    className={`item-row ${isSelected ? 'active' : ''} ${
+                      isHovered ? 'hovered' : ''
+                    }`}
+                    onMouseEnter={() => onHoverId(item.id)}
+                    onMouseLeave={() => onHoverId(null)}
                     onClick={() => onSelectId(isSelected ? null : item.id)}
                   >
                     <td>
@@ -105,19 +97,19 @@ export const DaycareListTable: React.FC<DaycareListTableProps> = ({
                         {item.address}
                       </div>
                     </td>
-                    <td>{item.ageGroupLabel}</td>
+                    <td>{item.age_group_label_he}</td>
                     <td>
-                      <strong>{item.priceFormattedHeader}</strong>
+                      <strong>{item.price_formatted_he}</strong>
                       <div style={{ fontSize: '11px', color: '#204E37' }}>
-                        {item.priceTrustBadge}
+                        {item.trust_badge_he}
                       </div>
                     </td>
-                    <td>{item.subsidized ? 'כן (סמל)' : 'לא'}</td>
+                    <td>{item.is_subsidized ? 'כן (סמל/רשות)' : 'לא'}</td>
                     <td>
                       <span
-                        className={`licensing-icon ${item.licenseStatusCode}`}
-                        title={item.licenseStatusText}
-                        aria-label={item.licenseStatusText}
+                        className={`licensing-icon ${item.license_icon_code}`}
+                        title={item.license_status_label_he}
+                        aria-label={item.license_status_label_he}
                       />
                     </td>
                   </tr>
@@ -134,10 +126,11 @@ export const DaycareListTable: React.FC<DaycareListTableProps> = ({
                               }}
                             />
                             <strong>סטטוס רישוי רשמי:&nbsp;</strong>
-                            <span>{item.regulatoryContextHe}</span>
+                            <span>{item.regulatory_context_he}</span>
                           </div>
 
-                          {item.symbolText && (
+                          {(item.ministry_edu_symbol ||
+                            item.labor_Cross_symbol) && (
                             <div className="detail-row">
                               <i
                                 className="field-icon"
@@ -146,11 +139,22 @@ export const DaycareListTable: React.FC<DaycareListTableProps> = ({
                                 }}
                               />
                               <strong>סמל מעון / מוסד:&nbsp;</strong>
-                              <span>{item.symbolText}</span>
+                              <span>
+                                {item.ministry_edu_symbol
+                                  ? `${item.ministry_edu_symbol} (משרד החינוך)`
+                                  : ''}
+                                {item.ministry_edu_symbol &&
+                                item.labor_Cross_symbol
+                                  ? ' · '
+                                  : ''}
+                                {item.labor_Cross_symbol
+                                  ? `${item.labor_Cross_symbol} (משרד העבודה)`
+                                  : ''}
+                              </span>
                             </div>
                           )}
 
-                          {item.activityHours && (
+                          {item.activity_hours_summary_he && (
                             <div className="detail-row">
                               <i
                                 className="field-icon"
@@ -159,11 +163,11 @@ export const DaycareListTable: React.FC<DaycareListTableProps> = ({
                                 }}
                               />
                               <strong>שעות פעילות מדווחות:&nbsp;</strong>
-                              <span>{item.activityHours}</span>
+                              <span>{item.activity_hours_summary_he}</span>
                             </div>
                           )}
 
-                          {item.benchmarkNeighborhoodText && (
+                          {item.benchmark_neighborhood_summary_he && (
                             <div className="detail-row">
                               <i
                                 className="field-icon"
@@ -172,11 +176,13 @@ export const DaycareListTable: React.FC<DaycareListTableProps> = ({
                                 }}
                               />
                               <strong>השוואה לסביבה (D-30):&nbsp;</strong>
-                              <span>{item.benchmarkNeighborhoodText}</span>
+                              <span>
+                                {item.benchmark_neighborhood_summary_he}
+                              </span>
                             </div>
                           )}
 
-                          {item.yoyTrendText && (
+                          {item.yoy_trend_summary_he && (
                             <div className="detail-row">
                               <i
                                 className="field-icon"
@@ -185,11 +191,11 @@ export const DaycareListTable: React.FC<DaycareListTableProps> = ({
                                 }}
                               />
                               <strong>היסטוריית מחירים (D-30):&nbsp;</strong>
-                              <span>{item.yoyTrendText}</span>
+                              <span>{item.yoy_trend_summary_he}</span>
                             </div>
                           )}
 
-                          {item.phone && (
+                          {item.phone_official && (
                             <div className="detail-row">
                               <i
                                 className="field-icon"
@@ -198,7 +204,9 @@ export const DaycareListTable: React.FC<DaycareListTableProps> = ({
                                 }}
                               />
                               <strong>טלפון המוסד:&nbsp;</strong>
-                              <a href={`tel:${item.phone}`}>{item.phone}</a>
+                              <a href={`tel:${item.phone_official}`}>
+                                {item.phone_official}
+                              </a>
                             </div>
                           )}
 
@@ -218,16 +226,23 @@ export const DaycareListTable: React.FC<DaycareListTableProps> = ({
                           <button
                             type="button"
                             className="bookend-btn primary"
+                            onClick={() => onOpenFullProfile(item)}
+                          >
+                            📊 כרטיס גן מלא (5 בלוקים, השוואה והיסטוריה)
+                          </button>
+                          <button
+                            type="button"
+                            className="bookend-btn"
                             onClick={() => onReportForDaycare(item)}
                           >
-                            + דווחו או עדכנו מחיר לגן זה
+                            + דווחו / עדכנו מחיר
                           </button>
                           <button
                             type="button"
                             className="bookend-btn"
                             onClick={() => onFlagErrorForDaycare(item)}
                           >
-                            🚩 מצאת טעות בנתונים?
+                            🚩 מצאתם טעות?
                           </button>
                         </div>
                       </td>

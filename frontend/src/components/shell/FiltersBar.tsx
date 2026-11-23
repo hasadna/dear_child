@@ -1,4 +1,8 @@
-import React, { useState } from 'react';
+import React, { useEffect, useState } from 'react';
+import {
+  AutocompleteLocationDto,
+  fetchAutocompleteLocations,
+} from '../../services/api-client';
 
 export type FilterDialogKey =
   | 'age_group'
@@ -18,6 +22,7 @@ export interface ActiveFilters {
 interface FiltersBarProps {
   filters: ActiveFilters;
   onFiltersChange: (next: ActiveFilters) => void;
+  onSelectAutocompleteSuggestion?: (suggestion: AutocompleteLocationDto) => void;
 }
 
 const FILTER_DIALOG_OPTIONS: Record<
@@ -63,14 +68,31 @@ const FILTER_DIALOG_OPTIONS: Record<
 };
 
 /**
- * סרגל החיפוש והסינון של "ילדי היקר"
+ * סרגל החיפוש, ההשלמה האוטומטית (Autocomplete) והסינון של "ילדי היקר"
  */
 export const FiltersBar: React.FC<FiltersBarProps> = ({
   filters,
   onFiltersChange,
+  onSelectAutocompleteSuggestion,
 }) => {
   const [expanded, setExpanded] = useState(true);
   const [openDialog, setOpenDialog] = useState<FilterDialogKey>(null);
+  const [suggestions, setSuggestions] = useState<AutocompleteLocationDto[]>([]);
+  const [showSuggestions, setShowSuggestions] = useState(false);
+
+  useEffect(() => {
+    let active = true;
+    if (filters.searchTerm.trim().length < 2) {
+      setSuggestions([]);
+      return;
+    }
+    fetchAutocompleteLocations(filters.searchTerm).then((list) => {
+      if (active) setSuggestions(list);
+    });
+    return () => {
+      active = false;
+    };
+  }, [filters.searchTerm]);
 
   const activeCategoryCount =
     (filters.ageGroups.length > 0 ? 1 : 0) +
@@ -138,12 +160,48 @@ export const FiltersBar: React.FC<FiltersBarProps> = ({
           <input
             type="search"
             aria-label="חיפוש לפי עיר, רחוב או שם המסגרת"
-            placeholder="חיפוש לפי עיר, כתובת או שם מסגרת..."
+            placeholder="חיפוש לפי עיר, כתובת, סמל מוסד או שם מסגרת..."
             value={filters.searchTerm}
-            onChange={(e) =>
-              onFiltersChange({ ...filters, searchTerm: e.target.value })
-            }
+            onFocus={() => setShowSuggestions(true)}
+            onBlur={() => setTimeout(() => setShowSuggestions(false), 180)}
+            onChange={(e) => {
+              onFiltersChange({ ...filters, searchTerm: e.target.value });
+              setShowSuggestions(true);
+            }}
           />
+
+          {showSuggestions && suggestions.length > 0 && (
+            <div className="autocomplete-dropdown" role="listbox">
+              {suggestions.map((sug, idx) => (
+                <button
+                  key={idx}
+                  type="button"
+                  className="autocomplete-item"
+                  onMouseDown={(e) => {
+                    e.preventDefault();
+                    onFiltersChange({
+                      ...filters,
+                      searchTerm: sug.label_he,
+                    });
+                    setShowSuggestions(false);
+                    onSelectAutocompleteSuggestion?.(sug);
+                  }}
+                >
+                  <div className="ac-main-line">
+                    <span className="ac-kind-tag">
+                      {sug.kind === 'city'
+                        ? '🏙️ יישוב'
+                        : sug.kind === 'street'
+                          ? '🛣️ רחוב'
+                          : '🏠 מסגרת'}
+                    </span>
+                    <strong>{sug.label_he}</strong>
+                  </div>
+                  <div className="ac-sub-line">{sug.sublabel_he}</div>
+                </button>
+              ))}
+            </div>
+          )}
         </div>
       </div>
 
@@ -181,6 +239,24 @@ export const FiltersBar: React.FC<FiltersBarProps> = ({
               מאפיינים ומחיר{' '}
               {filters.features.length > 0 ? `(${filters.features.length})` : ''}
             </button>
+
+            {(activeCategoryCount > 0 || filters.searchTerm.trim() !== '') && (
+              <button
+                type="button"
+                className="reset-all-filters-btn"
+                onClick={() =>
+                  onFiltersChange({
+                    searchTerm: '',
+                    ageGroups: [],
+                    licensing: [],
+                    subsidy: [],
+                    features: [],
+                  })
+                }
+              >
+                ✕ איפוס סינון
+              </button>
+            )}
           </div>
         </div>
       )}
