@@ -45,6 +45,7 @@
 - [`backend/`](./backend/) — שרת `Node.js / TypeScript (Fastify)`: הפרדת `roPool` (`app_public_ro`) ו-`writePool` (`app_backend_write`), מנגנון `Unlinkable Nullifiers` + עוגיית סשן מוצפנת ב-`HKDF`, לוגיקת `resolveFacilityItem` וקליינט סנכרון מסגרות (`facilities-resolver.ts`), נקודות קצה `/api/v1/*` ו-`/mcp` (`yaldi-hayakar-mcp`).
 - [`frontend/`](./frontend/) — ממשק משתמש `React 19 + TypeScript + Vite` הכולל את מערכת העיצוב (`src/styles/theme.css`), האייקונים (`public/icons/`) ורכיבי המעטפת (`AppHeader`, `FiltersBar`, `DaycareListTable`, `OnboardingModal` תחת `src/components/shell/`).
 - [`Dockerfile`](./Dockerfile) ו-[`docker-compose.yml`](./docker-compose.yml) — בנייה רב-שלבית לקונטיינר מאוחד עבור `hasadna-k8s` (`D-38`) וסביבת פיתוח מקומית עם `PostgreSQL 17 + PostGIS 3.4`.
+- [`scripts/`](./scripts/) — סקריפטי הפעלה ועצירה בלחיצת כפתור (`start-local.bat` ו-`stop-local.bat`) להרמת סביבת ה-Docker המלאה, הרצת מיגרציות ופתיחה אוטומטית בדפדפן.
 
 ### 5. חומרי מקור וגיבויים לוקאליים (`references/` — מוחרגים מ-Git)
 - `references/original-materials/` — הקבצים המקוריים שהתקבלו עם הפרויקט (`ילדי היקר.docx` ו-`Talpiot 4 Good - Hackathon Results.html`).
