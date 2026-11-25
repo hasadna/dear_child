@@ -30,6 +30,7 @@
 - [`docs/05_api_and_mcp_specification.md`](./docs/05_api_and_mcp_specification.md) — **איפיון מיקרו חלק ב' (`API & MCP Spec v1`):** מפרט נקודות הקצה של ה-REST API (`OpenAPI 3.1.0`), אימות `Google OIDC` (`Scope: openid` בלבד), `Sanity Check`, ייצוא `CSV/XLSX` ו-5 הכלים של שרת ה-MCP (`yaldi-hayakar-mcp`).
 - [`docs/06_ui_ux_and_cartography_spec.md`](./docs/06_ui_ux_and_cartography_spec.md) — **איפיון מיקרו חלק ג' (`UI/UX & Cartography Spec v1`):** אימוץ רכיבי המעטפת מ"מפת הטף", תצוגת מפה + טבלה נגישה (`ת"י 5568 AA`), קרטוגרפיה (`Supercluster` ו-`Price Pills`), כרטיס הגן ואשף דיווח ההורים ב-60 שניות.
 - [`docs/07_deployment_guide_hasadna_k8s.md`](./docs/07_deployment_guide_hasadna_k8s.md) ו-[`docs/k8s/`](./docs/k8s/) — **מדריך פריסה ל-DevOps ומניפסטי `Kubernetes / ArgoCD`:** הגדרת `Deployment`, `Service`, `Ingress`, `PreSync Migration Job`, `Weekly ETL CronJob`, `Annual Privacy Nullifier Reset CronJob` ומיפוי הסודות ל-`HashiCorp Vault`.
+- [`docs/08_mvp_gaps_and_pre_launch_checklist.md`](./docs/08_mvp_gaps_and_pre_launch_checklist.md) — **מעקב פערים וצ'קליסט טרום-השקה (`MVP1 → Production → Phase 2`):** ריכוז חי של כל ההקלות הזמניות, הטיוטות והאינטגרציות החסרות (Google OIDC אמיתי, Cloudflare Turnstile, אישור משפטי לתנאי השימוש, מסלול מסגרות לא-רשומות ועוד).
 
 ### 3. דוחות מחקר ודגימות דאטה (`research/`)
 - [`research/00_sources_and_links_catalog.md`](./research/00_sources_and_links_catalog.md) — קטלוג מאוחד של כלל הקישורים, מאגרי המידע, ה-APIs, הרישיונות והריפוזיטוריז.

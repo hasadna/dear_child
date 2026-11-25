@@ -40,10 +40,11 @@ jobs:
           npm test
           npm run build
 
-      - name: Install & Build Frontend SPA
+      - name: Install, Test & Build Frontend SPA
         working-directory: frontend
         run: |
           npm install
+          npm test
           npm run build
 
   publish-image:
