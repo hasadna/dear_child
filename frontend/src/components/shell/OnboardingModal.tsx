@@ -1,19 +1,20 @@
 import React from 'react';
+import { useModalDismiss } from './useModalDismiss';
 
 interface OnboardingModalProps {
   open: boolean;
   onCloseAndSearch: () => void;
-  onOpenReportFlow: () => void;
 }
 
 /**
- * חלונית Onboarding ופתיחה של "ילדי היקר" (docs/06 סעיף 1.1)
+ * חלונית Onboarding ואודות של "ילדי היקר" (כולל X בצד שמאל למעלה, Esc ולחיצה בחוץ)
  */
 export const OnboardingModal: React.FC<OnboardingModalProps> = ({
   open,
   onCloseAndSearch,
-  onOpenReportFlow,
 }) => {
+  useModalDismiss(open, onCloseAndSearch);
+
   if (!open) return null;
 
   return (
@@ -22,42 +23,43 @@ export const OnboardingModal: React.FC<OnboardingModalProps> = ({
       role="dialog"
       aria-modal="true"
       aria-labelledby="onboarding-title"
+      onClick={(e) => {
+        if (e.target === e.currentTarget) onCloseAndSearch();
+      }}
     >
       <div
-        className="app-dialog-container"
-        style={{ maxWidth: '560px', padding: '24px' }}
+        className="wizard-modal-card"
+        style={{ padding: '22px 26px' }}
       >
-        <div
-          style={{
-            display: 'flex',
-            alignItems: 'center',
-            gap: '12px',
-            marginBottom: '16px',
-          }}
-        >
-          <img
-            src="/icons/logo-header.svg"
-            alt=""
-            width={42}
-            height={44}
-          />
-          <div>
-            <h1
-              id="onboarding-title"
-              style={{ fontSize: '22px', color: '#053856', fontWeight: 700 }}
-            >
-              ברוכים הבאים ל"ילדי היקר"
-            </h1>
-            <p style={{ fontSize: '13px', color: '#4A4A4A' }}>
-              מיזם שקיפות מחירים ופיקוח בגיל הרך (לידה עד 6) · הסדנא לידע ציבורי
-              (ע״ר) וועד ההורים הארצי
-            </p>
+        <div className="modal-top-bar" style={{ marginBottom: '12px' }}>
+          <div style={{ display: 'flex', alignItems: 'center', gap: '12px' }}>
+            <img src="/icons/logo-header.svg" alt="" width={40} height={42} />
+            <div>
+              <h1
+                id="onboarding-title"
+                style={{ fontSize: '21px', color: '#053856', fontWeight: 700 }}
+              >
+                ברוכים הבאים ל&quot;ילדי היקר&quot;
+              </h1>
+              <p style={{ fontSize: '12.5px', color: '#4A4A4A' }}>
+                שקיפות מחירים ופיקוח בגיל הרך (לידה עד 6) · הסדנא לידע ציבורי
+                (ע״ר) וועד ההורים הארצי
+              </p>
+            </div>
           </div>
+          <button
+            type="button"
+            className="modal-close-x-top"
+            aria-label="סגירת חלון אודות"
+            onClick={onCloseAndSearch}
+          >
+            ✕
+          </button>
         </div>
 
         <p
           style={{
-            fontSize: '15px',
+            fontSize: '14.5px',
             lineHeight: 1.55,
             color: '#383838',
             marginBottom: '16px',
@@ -68,52 +70,6 @@ export const OnboardingModal: React.FC<OnboardingModalProps> = ({
           <strong>דיווחי מחירי מחירון אנונימיים ומאומתים של הורים</strong> — כדי
           שכל הורה יוכל להשוות תפוחים-לתפוחים (לפי גיל, שעות, ימי שישי והזנה).
         </p>
-
-        <div
-          style={{
-            display: 'flex',
-            flexDirection: 'column',
-            gap: '10px',
-            marginBottom: '16px',
-          }}
-        >
-          <button
-            type="button"
-            onClick={onCloseAndSearch}
-            style={{
-              backgroundColor: '#053856',
-              color: '#ffffff',
-              border: 'none',
-              borderRadius: '24px',
-              padding: '12px 20px',
-              fontSize: '15px',
-              fontWeight: 700,
-              cursor: 'pointer',
-            }}
-          >
-            🔍 חיפוש והשוואת גנים ומחירים באזור שלי
-          </button>
-
-          <button
-            type="button"
-            onClick={() => {
-              onCloseAndSearch();
-              onOpenReportFlow();
-            }}
-            style={{
-              backgroundColor: '#97D6BE',
-              color: '#053856',
-              border: '1px solid #053856',
-              borderRadius: '24px',
-              padding: '12px 20px',
-              fontSize: '15px',
-              fontWeight: 700,
-              cursor: 'pointer',
-            }}
-          >
-            ➕ דיווח אנונימי על מחיר הגן שלנו (60 שניות · Zero-PII)
-          </button>
-        </div>
 
         <div
           style={{
