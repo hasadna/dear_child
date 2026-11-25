@@ -1,5 +1,9 @@
-import React from 'react';
+import React, { useEffect, useRef, useState } from 'react';
 import { DaycareDetailDto } from '../../services/api-client';
+import {
+  formatHebrewYearShort,
+  getActiveSchoolYear,
+} from '../../utils/school-years';
 
 interface DaycareListTableProps {
   items: DaycareDetailDto[];
@@ -30,6 +34,43 @@ export const DaycareListTable: React.FC<DaycareListTableProps> = ({
   onFlagErrorForDaycare,
   onExportCsv,
 }) => {
+  const tableContainerRef = useRef<HTMLDivElement | null>(null);
+  const [sharedId, setSharedId] = useState<string | null>(null);
+
+  // גלילה אוטומטית חלקה אל השורה הנבחרת בטבלה (למשל בעת לחיצה על סיכה במפה)
+  useEffect(() => {
+    if (!selectedId || !tableContainerRef.current) return;
+    const row = tableContainerRef.current.querySelector(
+      `tr[data-daycare-id="${selectedId}"]`
+    );
+    if (row && typeof row.scrollIntoView === 'function') {
+      row.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+    }
+  }, [selectedId]);
+
+  const handleShareRow = async (item: DaycareDetailDto) => {
+    const shareUrl = `${window.location.origin}/?daycare=${encodeURIComponent(item.id)}`;
+    if (navigator.share) {
+      try {
+        await navigator.share({
+          title: `${item.name} — ילדי היקר`,
+          text: `${item.name} (${item.address}) — ${item.price_formatted_he}`,
+          url: shareUrl,
+        });
+        return;
+      } catch {
+        // cancelled
+      }
+    }
+    try {
+      await navigator.clipboard.writeText(shareUrl);
+      setSharedId(item.id);
+      setTimeout(() => setSharedId(null), 2200);
+    } catch {
+      // ignore
+    }
+  };
+
   return (
     <div className="app-item-list-container">
       <div className="area-summary-bar">
@@ -47,7 +88,7 @@ export const DaycareListTable: React.FC<DaycareListTableProps> = ({
         </button>
       </div>
 
-      <div className="app-table-scroll">
+      <div className="app-table-scroll" ref={tableContainerRef}>
         <table className="app-table" aria-label="רשימת מעונות וגני ילדים">
           <thead>
             <tr>
@@ -56,7 +97,9 @@ export const DaycareListTable: React.FC<DaycareListTableProps> = ({
               </th>
               <th scope="col">שם מזהה ויישוב</th>
               <th scope="col">גיל</th>
-              <th scope="col">מחיר חודשי (תשפ״ז)</th>
+              <th scope="col">
+                מחיר חודשי ({formatHebrewYearShort(getActiveSchoolYear())})
+              </th>
               <th scope="col">סבסוד</th>
               <th scope="col">רישוי</th>
             </tr>
@@ -68,6 +111,7 @@ export const DaycareListTable: React.FC<DaycareListTableProps> = ({
               return (
                 <React.Fragment key={item.id}>
                   <tr
+                    data-daycare-id={item.id}
                     className={`item-row ${isSelected ? 'active' : ''} ${
                       isHovered ? 'hovered' : ''
                     }`}
@@ -175,7 +219,7 @@ export const DaycareListTable: React.FC<DaycareListTableProps> = ({
                                   backgroundImage: 'url(/icons/icon-info.svg)',
                                 }}
                               />
-                              <strong>השוואה לסביבה (D-30):&nbsp;</strong>
+                              <strong>השוואה לסביבה:&nbsp;</strong>
                               <span>
                                 {item.benchmark_neighborhood_summary_he}
                               </span>
@@ -190,7 +234,7 @@ export const DaycareListTable: React.FC<DaycareListTableProps> = ({
                                   backgroundImage: 'url(/icons/icon-info.svg)',
                                 }}
                               />
-                              <strong>היסטוריית מחירים (D-30):&nbsp;</strong>
+                              <strong>היסטוריית מחירים:&nbsp;</strong>
                               <span>{item.yoy_trend_summary_he}</span>
                             </div>
                           )}
@@ -228,7 +272,7 @@ export const DaycareListTable: React.FC<DaycareListTableProps> = ({
                             className="bookend-btn primary"
                             onClick={() => onOpenFullProfile(item)}
                           >
-                            📊 כרטיס גן מלא (5 בלוקים, השוואה והיסטוריה)
+                            📊 כרטיס גן מלא, השוואה והיסטוריה
                           </button>
                           <button
                             type="button"
@@ -236,6 +280,13 @@ export const DaycareListTable: React.FC<DaycareListTableProps> = ({
                             onClick={() => onReportForDaycare(item)}
                           >
                             + דווחו / עדכנו מחיר
+                          </button>
+                          <button
+                            type="button"
+                            className="bookend-btn"
+                            onClick={() => handleShareRow(item)}
+                          >
+                            {sharedId === item.id ? '✓ הקישור הועתק' : '🔗 שיתוף'}
                           </button>
                           <button
                             type="button"
