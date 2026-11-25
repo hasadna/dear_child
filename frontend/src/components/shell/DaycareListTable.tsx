@@ -15,12 +15,107 @@ interface DaycareListTableProps {
   onOpenFullProfile: (daycare: DaycareDetailDto) => void;
   onReportForDaycare: (daycare: DaycareDetailDto) => void;
   onFlagErrorForDaycare: (daycare: DaycareDetailDto) => void;
-  onExportCsv: () => void;
+  onExportExcel: () => void;
+}
+
+const KNOWN_AGE_RANGES: Record<string, [number, number]> = {
+  '0_1': [0, 1],
+  '1_2': [1, 2],
+  '2_3': [2, 3],
+  '0_3': [0, 3],
+  '0_3_mixed': [0, 3],
+  '3_6': [3, 6],
+};
+
+/**
+ * מאחד שכבות גיל לטווחים מספריים רציפים וקומפקטיים, למשל:
+ * ['0_1', '1_2', '2_3'] -> '0–3', ['0_1', '1_2', '2_3', '3_6'] -> '0–6', ['1_2', '3_6'] -> '1–2, 3–6'
+ */
+export function formatCompactAgeRange(
+  ageGroups: string[],
+  fallbackLabel = ''
+): string {
+  const intervals: [number, number][] = [];
+
+  for (const raw of ageGroups || []) {
+    const code = raw.trim();
+    if (KNOWN_AGE_RANGES[code]) {
+      intervals.push([...KNOWN_AGE_RANGES[code]]);
+      continue;
+    }
+    const match = code.match(/^(\d+)[_-](\d+)$/);
+    if (match) {
+      const start = Number(match[1]);
+      const end = Number(match[2]);
+      if (Number.isFinite(start) && Number.isFinite(end) && end >= start) {
+        intervals.push([start, end]);
+      }
+    }
+  }
+
+  if (intervals.length === 0) {
+    return fallbackLabel || '—';
+  }
+
+  intervals.sort((a, b) => a[0] - b[0] || a[1] - b[1]);
+
+  const merged: [number, number][] = [intervals[0]];
+  for (let i = 1; i < intervals.length; i += 1) {
+    const prev = merged[merged.length - 1];
+    const curr = intervals[i];
+    if (curr[0] <= prev[1]) {
+      prev[1] = Math.max(prev[1], curr[1]);
+    } else {
+      merged.push(curr);
+    }
+  }
+
+  return merged.map(([from, to]) => `${from}–${to}`).join(', ');
+}
+
+function formatCompactPriceCell(item: DaycareDetailDto): {
+  primary: string;
+  secondary: string | null;
+  isMuted: boolean;
+} {
+  if (item.display_mode === 'no_price' || item.headline_price_nis === null) {
+    return { primary: 'טרם דווח', secondary: null, isMuted: true };
+  }
+
+  if (
+    item.display_mode === 'range' &&
+    item.min_price_nis !== null &&
+    item.max_price_nis !== null &&
+    item.min_price_nis !== item.max_price_nis
+  ) {
+    return {
+      primary: `₪${item.min_price_nis.toLocaleString()}–${item.max_price_nis.toLocaleString()}`,
+      secondary: `⚠️ ${item.active_reports_count} דיווחים`,
+      isMuted: false,
+    };
+  }
+
+  const primary = `₪${item.headline_price_nis.toLocaleString()}`;
+  let secondary: string | null = null;
+  if (item.active_reports_count >= 2) {
+    secondary = `✓ ${item.active_reports_count} דיווחים`;
+  } else if (item.active_reports_count === 1) {
+    secondary = 'דיווח בודד';
+  }
+
+  return { primary, secondary, isMuted: false };
+}
+
+function buildGoogleMapsUrl(item: DaycareDetailDto): string {
+  const query = item.address?.trim()
+    ? `${item.name}, ${item.address}`
+    : `${item.lat},${item.lon}`;
+  return `https://www.google.com/maps/search/?api=1&query=${encodeURIComponent(query)}`;
 }
 
 /**
  * טבלת המסגרות הנגישה (ת"י 5568 AA) וכרטיס הפרטים המהיר של "ילדי היקר"
- * מסונכרנת דו-כיוונית עם סיכות המפה (Hover & Click) וכוללת פתיחת כרטיס גן מלא ב-5 בלוקים.
+ * מסונכרנת דו-כיוונית עם סיכות המפה (Hover & Click) וכוללת פתיחת כרטיס גן מלא.
  */
 export const DaycareListTable: React.FC<DaycareListTableProps> = ({
   items,
@@ -32,7 +127,7 @@ export const DaycareListTable: React.FC<DaycareListTableProps> = ({
   onOpenFullProfile,
   onReportForDaycare,
   onFlagErrorForDaycare,
-  onExportCsv,
+  onExportExcel,
 }) => {
   const tableContainerRef = useRef<HTMLDivElement | null>(null);
   const [sharedId, setSharedId] = useState<string | null>(null);
@@ -75,16 +170,16 @@ export const DaycareListTable: React.FC<DaycareListTableProps> = ({
     <div className="app-item-list-container">
       <div className="area-summary-bar">
         <span>
-          נמצאו <strong>{items.length}</strong> מסגרות חינוך רשמיות · חציון מחיר
-          פרטי באזור: <strong>₪{cityMedianPriceNis.toLocaleString()}</strong>
+          חציון מחיר באזור:{' '}
+          <strong>₪{cityMedianPriceNis.toLocaleString()}</strong>
         </span>
         <button
           type="button"
           className="export-btn"
-          onClick={onExportCsv}
-          aria-label="ייצוא תוצאות החיפוש לקובץ CSV או Excel"
+          onClick={onExportExcel}
+          aria-label="ייצוא תוצאות החיפוש לקובץ אקסל"
         >
-          📥 ייצוא לאקסל / CSV
+          📥 ייצוא לאקסל
         </button>
       </div>
 
@@ -95,12 +190,11 @@ export const DaycareListTable: React.FC<DaycareListTableProps> = ({
               <th scope="col">
                 <div className="total-tag">{items.length}</div>
               </th>
-              <th scope="col">שם מזהה ויישוב</th>
+              <th scope="col">שם וכתובת</th>
               <th scope="col">גיל</th>
               <th scope="col">
-                מחיר חודשי ({formatHebrewYearShort(getActiveSchoolYear())})
+                מחיר ({formatHebrewYearShort(getActiveSchoolYear())})
               </th>
-              <th scope="col">סבסוד</th>
               <th scope="col">רישוי</th>
             </tr>
           </thead>
@@ -108,6 +202,12 @@ export const DaycareListTable: React.FC<DaycareListTableProps> = ({
             {items.map((item) => {
               const isSelected = selectedId === item.id;
               const isHovered = hoveredId === item.id;
+              const compactAge = formatCompactAgeRange(
+                item.target_age_groups,
+                item.age_group_label_he
+              );
+              const priceCell = formatCompactPriceCell(item);
+
               return (
                 <React.Fragment key={item.id}>
                   <tr
@@ -136,19 +236,39 @@ export const DaycareListTable: React.FC<DaycareListTableProps> = ({
                       </div>
                     </td>
                     <td>
-                      <strong>{item.name}</strong>
-                      <div style={{ fontSize: '12px', color: '#7A7A7A' }}>
-                        {item.address}
+                      <div className="table-name-row">
+                        <strong>{item.name}</strong>
+                        {item.is_subsidized && (
+                          <span
+                            className="subsidized-inline-tag"
+                            title="מסגרת מסובסדת (סמל / רשות)"
+                          >
+                            מסובסד
+                          </span>
+                        )}
                       </div>
+                      <div className="table-sub-address">{item.address}</div>
                     </td>
-                    <td>{item.age_group_label_he}</td>
                     <td>
-                      <strong>{item.price_formatted_he}</strong>
-                      <div style={{ fontSize: '11px', color: '#204E37' }}>
-                        {item.trust_badge_he}
-                      </div>
+                      <span
+                        className="compact-age-pill"
+                        title={item.age_group_label_he}
+                      >
+                        {compactAge}
+                      </span>
                     </td>
-                    <td>{item.is_subsidized ? 'כן (סמל/רשות)' : 'לא'}</td>
+                    <td>
+                      <div
+                        className={`compact-price-main ${priceCell.isMuted ? 'muted' : ''}`}
+                      >
+                        {priceCell.primary}
+                      </div>
+                      {priceCell.secondary && (
+                        <div className="compact-price-sub">
+                          {priceCell.secondary}
+                        </div>
+                      )}
+                    </td>
                     <td>
                       <span
                         className={`licensing-icon ${item.license_icon_code}`}
@@ -160,44 +280,8 @@ export const DaycareListTable: React.FC<DaycareListTableProps> = ({
 
                   {isSelected && (
                     <tr className="app-details-box">
-                      <td colSpan={6}>
+                      <td colSpan={5}>
                         <div className="inner-fields">
-                          <div className="detail-row">
-                            <i
-                              className="field-icon"
-                              style={{
-                                backgroundImage: 'url(/icons/icon-deets.svg)',
-                              }}
-                            />
-                            <strong>סטטוס רישוי רשמי:&nbsp;</strong>
-                            <span>{item.regulatory_context_he}</span>
-                          </div>
-
-                          {(item.ministry_edu_symbol ||
-                            item.labor_Cross_symbol) && (
-                            <div className="detail-row">
-                              <i
-                                className="field-icon"
-                                style={{
-                                  backgroundImage: 'url(/icons/icon-deets.svg)',
-                                }}
-                              />
-                              <strong>סמל מעון / מוסד:&nbsp;</strong>
-                              <span>
-                                {item.ministry_edu_symbol
-                                  ? `${item.ministry_edu_symbol} (משרד החינוך)`
-                                  : ''}
-                                {item.ministry_edu_symbol &&
-                                item.labor_Cross_symbol
-                                  ? ' · '
-                                  : ''}
-                                {item.labor_Cross_symbol
-                                  ? `${item.labor_Cross_symbol} (משרד העבודה)`
-                                  : ''}
-                              </span>
-                            </div>
-                          )}
-
                           {item.activity_hours_summary_he && (
                             <div className="detail-row">
                               <i
@@ -206,7 +290,7 @@ export const DaycareListTable: React.FC<DaycareListTableProps> = ({
                                   backgroundImage: 'url(/icons/icon-clock.svg)',
                                 }}
                               />
-                              <strong>שעות פעילות מדווחות:&nbsp;</strong>
+                              <strong>שעות פעילות:&nbsp;</strong>
                               <span>{item.activity_hours_summary_he}</span>
                             </div>
                           )}
@@ -247,8 +331,12 @@ export const DaycareListTable: React.FC<DaycareListTableProps> = ({
                                   backgroundImage: 'url(/icons/icon-phone.svg)',
                                 }}
                               />
-                              <strong>טלפון המוסד:&nbsp;</strong>
-                              <a href={`tel:${item.phone_official}`}>
+                              <strong>טלפון:&nbsp;</strong>
+                              <a
+                                href={`tel:${item.phone_official}`}
+                                className="quick-action-link"
+                                onClick={(e) => e.stopPropagation()}
+                              >
                                 {item.phone_official}
                               </a>
                             </div>
@@ -262,7 +350,16 @@ export const DaycareListTable: React.FC<DaycareListTableProps> = ({
                               }}
                             />
                             <strong>כתובת:&nbsp;</strong>
-                            <span>{item.address}</span>
+                            <a
+                              href={buildGoogleMapsUrl(item)}
+                              target="_blank"
+                              rel="noopener noreferrer"
+                              className="quick-action-link"
+                              title="פתיחה ב-Google Maps"
+                              onClick={(e) => e.stopPropagation()}
+                            >
+                              {item.address} ↗
+                            </a>
                           </div>
                         </div>
 
@@ -272,7 +369,7 @@ export const DaycareListTable: React.FC<DaycareListTableProps> = ({
                             className="bookend-btn primary"
                             onClick={() => onOpenFullProfile(item)}
                           >
-                            📊 כרטיס גן מלא, השוואה והיסטוריה
+                            📊 כרטיס גן מלא
                           </button>
                           <button
                             type="button"
@@ -284,16 +381,42 @@ export const DaycareListTable: React.FC<DaycareListTableProps> = ({
                           <button
                             type="button"
                             className="bookend-btn"
-                            onClick={() => handleShareRow(item)}
-                          >
-                            {sharedId === item.id ? '✓ הקישור הועתק' : '🔗 שיתוף'}
-                          </button>
-                          <button
-                            type="button"
-                            className="bookend-btn"
                             onClick={() => onFlagErrorForDaycare(item)}
                           >
                             🚩 מצאתם טעות?
+                          </button>
+                          <button
+                            type="button"
+                            className={`bookend-icon-btn ${sharedId === item.id ? 'copied' : ''}`}
+                            aria-label="שיתוף"
+                            title={
+                              sharedId === item.id
+                                ? 'הקישור הועתק!'
+                                : 'שיתוף קישור לגן'
+                            }
+                            onClick={() => handleShareRow(item)}
+                          >
+                            {sharedId === item.id ? (
+                              '✓'
+                            ) : (
+                              <svg
+                                width="15"
+                                height="15"
+                                viewBox="0 0 24 24"
+                                fill="none"
+                                stroke="currentColor"
+                                strokeWidth="2.2"
+                                strokeLinecap="round"
+                                strokeLinejoin="round"
+                                aria-hidden="true"
+                              >
+                                <circle cx="18" cy="5" r="3" />
+                                <circle cx="6" cy="12" r="3" />
+                                <circle cx="18" cy="19" r="3" />
+                                <line x1="8.59" y1="13.51" x2="15.42" y2="17.49" />
+                                <line x1="15.41" y1="6.51" x2="8.59" y2="10.49" />
+                              </svg>
+                            )}
                           </button>
                         </div>
                       </td>

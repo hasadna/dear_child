@@ -407,8 +407,7 @@ export async function registerAuthAndReportsRoutes(
     return {
       status: 'received',
       request_id: requestId,
-      message_he:
-        'תודה! פנייתך התקבלה ותיבדק ע״י צוות הפרויקט בהתאם לנוהל אימות הנתונים.',
+      message_he: 'תודה! הפנייה נקלטה ותיבדק.',
     };
   });
 }

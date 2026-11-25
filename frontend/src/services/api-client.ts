@@ -1,3 +1,6 @@
+import { obtainGoogleIdToken } from '../utils/google-auth';
+import { formatHebrewSchoolYear } from '../utils/school-years';
+
 /**
  * לקוח ה-API של "ילדי היקר" (Frontend REST API Client)
  * מתקשר מול שרתי ה-Fastify (/api/v1/*) וכולל מנגנון גיבוי אוטומטי (Offline Demo Store)
@@ -143,7 +146,7 @@ export interface AutocompleteLocationDto {
 }
 
 export interface ReportItemPayload {
-  school_year: 2025 | 2026 | 2027;
+  school_year: number;
   age_group: '0_1' | '1_2' | '2_3' | '0_3_mixed' | '3_6';
   monthly_price_nis: number;
   start_time_weekday: string;
@@ -175,6 +178,7 @@ export interface CorrectionRequestPayload {
     | 'wrong_license_status'
     | 'other_factual_error';
   selected_field_notes_code?: string | null;
+  details_text?: string;
   submitter_role: 'parent' | 'daycare_operator' | 'researcher_or_public';
   turnstile_token: string;
 }
@@ -1047,18 +1051,418 @@ export function filterDaycaresClientSide(
   });
 }
 
+const DEFAULT_RELIANCE_DISCLAIMER_HE =
+  'הבהרה משפטית: נתוני הרישוי מבוססים על מאגרי משרד החינוך, משרד העבודה והרשויות המקומיות ומתעדכנים מעת לעת. נתוני המחירים מבוססים על דיווחי הורים למחירון הכללי של המסגרת ומוצגים לצורכי שקיפות והשוואה צרכנית בלבד — יש לוודא את התעריף ותנאי ההתקשרות העדכניים ישירות מול הנהלת המסגרת.';
+
+const AGE_GROUP_LABELS: Record<string, string> = {
+  '0_1': 'תינוקות (לידה עד שנה)',
+  '1_2': 'פעוטות צעירים (שנה עד שנתיים)',
+  '2_3': 'פעוטות בוגרים (שנתיים עד שלוש)',
+  '0_3': 'לידה עד 3',
+  '0_3_mixed': 'רב-גילי (לידה עד 3)',
+  '3_6': 'גילאי 3–6',
+};
+
+function mapLicenseStatus(rawStatus: string | undefined, isSubsidized: boolean): {
+  labelHe: string;
+  iconCode: 'valid' | 'in_progress' | 'did_not_apply' | 'none';
+} {
+  switch (rawStatus) {
+    case 'licensed':
+    case 'valid':
+    case 'licensed_valid':
+      return {
+        labelHe: 'רישיון הפעלה בתוקף (משרד החינוך)',
+        iconCode: 'valid',
+      };
+    case 'symbol_recognized':
+      return {
+        labelHe: 'מעון סמל מוכר לסבסוד (משרד העבודה ומשרד החינוך)',
+        iconCode: 'valid',
+      };
+    case 'municipal_verified':
+      return {
+        labelHe: 'מוסד רשמי מפוקח משרד החינוך והרשות המקומית',
+        iconCode: 'valid',
+      };
+    case 'in_process':
+    case 'in_progress':
+    case 'continuity_arrangement':
+      return {
+        labelHe: 'בתהליך רישוי (הסדר רציפות משרד החינוך)',
+        iconCode: 'in_progress',
+      };
+    case 'did_not_apply':
+      return {
+        labelHe: 'לא הוגשה בקשה לרישיון במרשם',
+        iconCode: 'did_not_apply',
+      };
+    default:
+      if (isSubsidized) {
+        return {
+          labelHe: 'מעון סמל מוכר לסבסוד',
+          iconCode: 'valid',
+        };
+      }
+      return {
+        labelHe: 'מופיע במאגרים הרשמיים',
+        iconCode: 'none',
+      };
+  }
+}
+
+function mapDisplayMode(
+  rawMode: string | undefined,
+  reportsCount: number
+): 'no_price' | 'single' | 'range' | 'median' {
+  if (reportsCount <= 0) return 'no_price';
+  if (rawMode === 'range_discrepancy' || rawMode === 'range') return 'range';
+  if (rawMode === 'median_consensus' || rawMode === 'median' || rawMode === 'average_close') {
+    return 'median';
+  }
+  return reportsCount >= 3 ? 'median' : 'single';
+}
+
+function mapTrustTier(
+  rawTier: string | undefined,
+  displayMode: 'no_price' | 'single' | 'range' | 'median',
+  isSubsidized: boolean
+): DaycareListItemDto['price_Trust_tier'] {
+  if (displayMode === 'no_price') return 'no_price';
+  if (isSubsidized) return 'official_regulated';
+  if (rawTier === 'tier_2_parent_consensus' || displayMode === 'median') {
+    return 'community_consensus';
+  }
+  if (displayMode === 'range') return 'community_discrepancy';
+  return 'single_parent_report';
+}
+
+function formatAgeGroupsLabel(ageGroups: string[]): string {
+  if (!Array.isArray(ageGroups) || ageGroups.length === 0) return 'לידה עד 3';
+  if (ageGroups.includes('3_6') && ageGroups.length === 1) return 'גילאי 3–6';
+  if (ageGroups.includes('0_3') || ageGroups.includes('0_3_mixed')) return 'לידה עד 3';
+  return ageGroups.map((g) => AGE_GROUP_LABELS[g] || g).join(', ');
+}
+
 /**
- * שליפת רשימת מסגרות (מנסה מול ה-Backend ובמקרה של סביבה ללא DB חוזר למאגר המקומי)
+ * מתאם בטוח (Adapter) מה-DTO של שרת ה-Backend (GET /api/v1/daycares) למבנה ה-Frontend
+ * מונע שדות undefined וקריסות רינדור ב-DaycareProfileModal וב-ParentReportWizardModal.
+ */
+function normalizeBackendListItem(raw: Record<string, unknown>): DaycareDetailDto {
+  // אם הרשומה כבר בפורמט ה-Frontend המלא — רק מוודאים שכל המערכים קיימים
+  if (typeof raw.id === 'string' && typeof raw.name === 'string' && Array.isArray(raw.target_age_groups)) {
+    return {
+      ...(raw as unknown as DaycareDetailDto),
+      price_cohorts: Array.isArray(raw.price_cohorts) ? raw.price_cohorts : [],
+      relative_benchmarks: Array.isArray(raw.relative_benchmarks) ? raw.relative_benchmarks : [],
+      yoy_price_history: Array.isArray(raw.yoy_price_history) ? raw.yoy_price_history : [],
+      individual_reports: Array.isArray(raw.individual_reports) ? raw.individual_reports : [],
+      regulated_benchmark_comparison:
+        (raw.regulated_benchmark_comparison as DaycareDetailDto['regulated_benchmark_comparison']) || {
+          regulated_symbol_max_price_nis: 2515,
+          annual_gap_11_months_nis: null,
+          summary_he: 'תעריף מקסימום מפוקח להשוואה: ₪2,515 לחודש.',
+        },
+      reliance_disclaimer_he:
+        (typeof raw.reliance_disclaimer_he === 'string' && raw.reliance_disclaimer_he) ||
+        DEFAULT_RELIANCE_DISCLAIMER_HE,
+    };
+  }
+
+  const loc = (raw.location as { lat?: number; lng?: number } | undefined) || {};
+  const isSubsidized = Boolean(raw.is_subsidized_symbol ?? raw.is_subsidized);
+  const licenseStatusStr = String(raw.license_status || 'licensed');
+  const { labelHe: licenseLabelHe, iconCode } = mapLicenseStatus(licenseStatusStr, isSubsidized);
+
+  const ageGroups = Array.isArray(raw.age_groups_supported)
+    ? (raw.age_groups_supported as string[]).map((g) => (g === '0_3' ? '0_3_mixed' : g))
+    : ['0_3_mixed'];
+
+  const priceSummary = (raw.price_summary_current_year as Record<string, unknown> | null) || null;
+  const reportsCount = Number(priceSummary?.reports_count ?? 0);
+  const headlinePrice =
+    priceSummary && typeof priceSummary.primary_pin_price_nis === 'number'
+      ? priceSummary.primary_pin_price_nis
+      : null;
+  const minPrice =
+    priceSummary && typeof priceSummary.min_price_nis === 'number'
+      ? priceSummary.min_price_nis
+      : headlinePrice;
+  const maxPrice =
+    priceSummary && typeof priceSummary.max_price_nis === 'number'
+      ? priceSummary.max_price_nis
+      : headlinePrice;
+
+  const displayMode = mapDisplayMode(
+    priceSummary?.price_display_mode as string | undefined,
+    reportsCount
+  );
+  const trustTier = mapTrustTier(
+    priceSummary?.price_trust_tier as string | undefined,
+    displayMode,
+    isSubsidized
+  );
+
+  const hasStopOrder = Boolean(raw.has_active_stop_order);
+  const priceFormattedHe =
+    (typeof priceSummary?.formatted_header_he === 'string' && priceSummary.formatted_header_he) ||
+    (headlinePrice !== null
+      ? `₪${headlinePrice.toLocaleString()} לחודש`
+      : 'טרם דווח מחיר — היו הראשונים לדווח!');
+
+  const pricePillShortHe = hasStopOrder
+    ? '⚠️ צו הפסקה'
+    : (typeof priceSummary?.formatted_pin_he === 'string' && priceSummary.formatted_pin_he) ||
+      (headlinePrice !== null
+        ? isSubsidized
+          ? `🛡️ ₪${headlinePrice.toLocaleString()}`
+          : displayMode === 'median'
+            ? `✓ ₪${headlinePrice.toLocaleString()}`
+            : displayMode === 'range'
+              ? `~₪${headlinePrice.toLocaleString()}`
+              : `₪${headlinePrice.toLocaleString()}`
+        : '+ הוסף מחיר');
+
+  const trustBadgeHe =
+    displayMode === 'no_price'
+      ? 'מסגרת רשמית (ממתינה לדיווח מחיר ראשון)'
+      : isSubsidized
+        ? `🛡️ מסלול מפוקח / מסובסד (${reportsCount} דיווחים)`
+        : displayMode === 'median'
+          ? `✓ מידע הורים מאומת (${reportsCount} דיווחים)`
+          : displayMode === 'range'
+            ? `⚠️ פער בין ${reportsCount} דיווחים (מוצג טווח)`
+            : `ℹ️ דיווח בודד (ממתין לאימות הורים נוסף)`;
+
+  const regulatedMax = 2515;
+  const annualGap =
+    !isSubsidized && headlinePrice !== null && headlinePrice > regulatedMax
+      ? (headlinePrice - regulatedMax) * 11
+      : null;
+
+  return {
+    id: String(raw.daycare_id || raw.id || ''),
+    name: String(raw.display_name || raw.name || 'מסגרת ללא שם'),
+    city_code: Number(raw.city_code || 5000),
+    city_name_he: String(raw.city_name_he || ''),
+    address: String(raw.full_address_public || raw.address || ''),
+    lat: Number(loc.lat ?? raw.lat ?? 32.0853),
+    lon: Number(loc.lng ?? raw.lon ?? 34.7818),
+    target_age_groups: ageGroups,
+    age_group_label_he: formatAgeGroupsLabel(ageGroups),
+    is_subsidized: isSubsidized,
+    license_status: licenseStatusStr,
+    license_status_label_he: licenseLabelHe,
+    license_icon_code: iconCode,
+    ministry_edu_symbol: raw.moe_symbol ? String(raw.moe_symbol) : null,
+    labor_Cross_symbol: raw.mol_symbol ? String(raw.mol_symbol) : null,
+    operator_name: raw.operator_entity_name ? String(raw.operator_entity_name) : null,
+    phone_official: raw.official_phone_public ? String(raw.official_phone_public) : null,
+    has_active_stop_order: hasStopOrder,
+    display_mode: displayMode,
+    price_Trust_tier: trustTier,
+    price_formatted_he: priceFormattedHe,
+    price_pill_short_he: pricePillShortHe,
+    trust_badge_he: trustBadgeHe,
+    headline_price_nis: headlinePrice,
+    min_price_nis: minPrice,
+    max_price_nis: maxPrice,
+    active_reports_count: reportsCount,
+    school_year: Number(priceSummary?.school_year ?? 2027),
+    activity_hours_summary_he: null,
+    yoy_trend_summary_he: null,
+    benchmark_neighborhood_summary_he: null,
+    regulatory_context_he: String(
+      raw.regulatory_context_he || 'מסגרת המופיעה במאגרים הרשמיים.'
+    ),
+    price_cohorts: [],
+    relative_benchmarks: [],
+    regulated_benchmark_comparison: {
+      regulated_symbol_max_price_nis: regulatedMax,
+      annual_gap_11_months_nis: annualGap,
+      summary_he:
+        annualGap !== null
+          ? `מחיר מסגרת פרטית זו גבוה מתעריף מעון סמל מפוקח (₪${regulatedMax.toLocaleString()}) בפער שנתי מוערך של ₪${annualGap.toLocaleString()} (11 חודשים).`
+          : `תעריף מעון סמל מפוקח להשוואה: ₪${regulatedMax.toLocaleString()} לחודש.`,
+    },
+    yoy_price_history: [],
+    individual_reports: [],
+    reliance_disclaimer_he: DEFAULT_RELIANCE_DISCLAIMER_HE,
+  };
+}
+
+/**
+ * מתאם בטוח מהתשובה המלאה של GET /api/v1/daycares/:id למבנה 5 הבלוקים של DaycareProfileModal
+ */
+function normalizeBackendDetailResponse(raw: Record<string, unknown>): DaycareDetailDto {
+  const daycareObj = (raw.daycare as Record<string, unknown> | undefined) || raw;
+  const base = normalizeBackendListItem(daycareObj);
+
+  const matrix = Array.isArray(raw.price_matrix_by_age)
+    ? (raw.price_matrix_by_age as Record<string, unknown>[])
+    : [];
+  const priceCohorts: PriceCohortSummaryDto[] = matrix.map((c) => {
+    const reportsCount = Number(c.reports_count ?? 0);
+    const dm = mapDisplayMode(c.price_display_mode as string | undefined, reportsCount);
+    const repPrice = Number(c.representative_price_nis ?? 0);
+    const minP = Number(c.min_price_nis ?? repPrice);
+    const maxP = Number(c.max_price_nis ?? repPrice);
+    return {
+      school_year: Number(c.school_year ?? 2027),
+      school_year_label: String(c.school_year_label || 'תשפ"ז (2026–2027)'),
+      age_group: String(c.age_group || '0_3_mixed'),
+      age_group_label_he: String(
+        c.age_group_label_he || AGE_GROUP_LABELS[String(c.age_group)] || 'לידה עד 3'
+      ),
+      is_municipal_tzaharon_only: c.framework_track === 'municipal_tzaharon',
+      hours_bucket: c.is_full_day ? 'full_day' : 'half_day',
+      includes_friday: null,
+      includes_nutrition: null,
+      active_reports_count: reportsCount,
+      display_mode: dm,
+      headline_price_nis: repPrice || null,
+      min_price_nis: minP || null,
+      max_price_nis: maxP || null,
+      iqr_q25_nis: typeof c.p25_price_nis === 'number' ? c.p25_price_nis : null,
+      iqr_q75_nis: typeof c.p75_price_nis === 'number' ? c.p75_price_nis : null,
+      price_formatted_he:
+        dm === 'range'
+          ? `₪${minP.toLocaleString()}–₪${maxP.toLocaleString()} לחודש (טווח ${reportsCount} דיווחים)`
+          : dm === 'median'
+            ? `₪${repPrice.toLocaleString()} לחודש (חציון)`
+            : `₪${repPrice.toLocaleString()} לחודש (דיווח בודד)`,
+      trust_badge_he:
+        dm === 'median'
+          ? `✓ מידע הורים מאומת (${reportsCount} דיווחים)`
+          : dm === 'range'
+            ? `⚠️ פער בין ${reportsCount} דיווחים (מוצג טווח)`
+            : `ℹ️ דיווח בודד (${reportsCount})`,
+    };
+  });
+
+  const rawBenchmarks = (raw.benchmarks as Record<string, unknown> | undefined) || {};
+  const rawComps = Array.isArray(rawBenchmarks.comparisons)
+    ? (rawBenchmarks.comparisons as Record<string, unknown>[])
+    : [];
+  const relativeBenchmarks: BenchmarkMetricDto[] = rawComps.map((b) => {
+    const diffNis = typeof b.diff_from_median_nis === 'number' ? b.diff_from_median_nis : null;
+    const diffPct = typeof b.diff_from_median_pct === 'number' ? b.diff_from_median_pct : null;
+    const medianNis = typeof b.median_price_nis === 'number' ? b.median_price_nis : null;
+    const sampleN = Number(b.sample_daycares_n ?? 0);
+    const direction =
+      diffNis === null ? '' : diffNis < 0 ? 'זול ב-' : diffNis > 0 ? 'יקר ב-' : 'זהה ל-';
+    return {
+      scope: (b.benchmark_scope as BenchmarkMetricDto['scope']) || 'city_all_same_track',
+      label_he: String(b.label_he || 'השוואה אזורית'),
+      median_price_nis: medianNis,
+      iqr_q25_nis: typeof b.p25_price_nis === 'number' ? b.p25_price_nis : null,
+      iqr_q75_nis: typeof b.p75_price_nis === 'number' ? b.p75_price_nis : null,
+      sample_daycares_count: sampleN,
+      is_sufficient_sample: sampleN >= 3,
+      diff_nis: diffNis,
+      diff_pct: diffPct,
+      comparison_text_he:
+        diffNis !== null && medianNis !== null
+          ? `${direction}₪${Math.abs(diffNis).toLocaleString()} (${diffPct !== null && diffPct > 0 ? '+' : ''}${diffPct ?? 0}%) מהחציון (₪${medianNis.toLocaleString()} · N=${sampleN})`
+          : medianNis !== null
+            ? `חציון אזורי: ₪${medianNis.toLocaleString()} (N=${sampleN})`
+            : 'מדגם אזורי בבנייה',
+    };
+  });
+
+  const rawYoy = Array.isArray(raw.price_history_yoy)
+    ? (raw.price_history_yoy as Record<string, unknown>[])
+    : [];
+  const yoyHistory: YoYHistoryPointDto[] = rawYoy.map((y) => ({
+    school_year: Number(y.school_year ?? 2027),
+    school_year_label: String(y.school_year_label || ''),
+    age_group: String(y.age_group || '0_3_mixed'),
+    median_price_nis: Number(y.representative_price_nis ?? 0),
+    reports_count: Number(y.reports_count ?? 0),
+    yoy_change_nis: typeof y.yoy_diff_nis === 'number' ? y.yoy_diff_nis : null,
+    yoy_change_pct: typeof y.yoy_diff_pct === 'number' ? y.yoy_diff_pct : null,
+  }));
+
+  const rawReports = Array.isArray(raw.individual_reports)
+    ? (raw.individual_reports as Record<string, unknown>[])
+    : [];
+  const individualReports: IndividualReportSummaryDto[] = rawReports.map((r) => ({
+    school_year: Number(r.school_year ?? 2027),
+    school_year_label: String(r.school_year_label || 'תשפ"ז (2026–2027)'),
+    age_group: String(r.age_group || '0_3_mixed'),
+    age_group_label_he: AGE_GROUP_LABELS[String(r.age_group)] || 'לידה עד 3',
+    monthly_price_nis: Number(r.monthly_list_price_nis ?? 0),
+    start_time_weekday: r.hours_sun_thu_start ? String(r.hours_sun_thu_start) : null,
+    end_time_weekday: r.hours_sun_thu_end ? String(r.hours_sun_thu_end) : null,
+    includes_friday:
+      typeof r.includes_friday === 'boolean' ? r.includes_friday : null,
+    friday_start_time: r.hours_fri_start ? String(r.hours_fri_start) : null,
+    friday_end_time: r.hours_fri_end ? String(r.hours_fri_end) : null,
+    includes_nutrition:
+      typeof r.includes_nutrition === 'boolean' ? r.includes_nutrition : null,
+    is_municipal_tzaharon_only: r.framework_track === 'municipal_tzaharon',
+    report_source: String(r.source_type || 'parent_verified_google'),
+    report_source_label_he: String(r.source_label_he || 'דיווח הורה מאומת'),
+  }));
+
+  // אם שדות המחיר בכותרת ריקים אך קיימת מטריצת מחירים — נעדכן מהקוהורט הראשי
+  const primaryCohort = priceCohorts[0];
+  const regulatedMax = Number(rawBenchmarks.regulated_symbol_benchmark_nis ?? 2515);
+  const annualGap =
+    typeof rawBenchmarks.private_vs_regulated_annual_gap_nis === 'number'
+      ? rawBenchmarks.private_vs_regulated_annual_gap_nis
+      : base.regulated_benchmark_comparison.annual_gap_11_months_nis;
+
+  const metaObj = (raw.meta as Record<string, unknown> | undefined) || {};
+
+  return {
+    ...base,
+    operator_name: daycareObj.operator_entity_name
+      ? String(daycareObj.operator_entity_name)
+      : base.operator_name,
+    headline_price_nis: base.headline_price_nis ?? primaryCohort?.headline_price_nis ?? null,
+    price_formatted_he:
+      base.display_mode === 'no_price' && primaryCohort
+        ? primaryCohort.price_formatted_he
+        : base.price_formatted_he,
+    active_reports_count:
+      base.active_reports_count || individualReports.length || primaryCohort?.active_reports_count || 0,
+    price_cohorts: priceCohorts,
+    relative_benchmarks: relativeBenchmarks,
+    regulated_benchmark_comparison: {
+      regulated_symbol_max_price_nis: regulatedMax,
+      annual_gap_11_months_nis: annualGap,
+      summary_he:
+        annualGap !== null && annualGap > 0
+          ? `מחיר מסגרת פרטית זו גבוה מתעריף המקסימום של מעון סמל מפוקח (₪${regulatedMax.toLocaleString()}) בפער מצטבר של ₪${annualGap.toLocaleString()} לשנת לימודים (11 חודשים).`
+          : base.is_subsidized
+            ? `מסגרת במסלול מפוקח / מסובסד (תעריף ייחוס מפוקח: ₪${regulatedMax.toLocaleString()} לחודש).`
+            : `תעריף מעון סמל מפוקח להשוואה: ₪${regulatedMax.toLocaleString()} לחודש.`,
+    },
+    yoy_price_history: yoyHistory,
+    individual_reports: individualReports,
+    reliance_disclaimer_he:
+      (typeof metaObj.reliance_disclaimer_he === 'string' && metaObj.reliance_disclaimer_he) ||
+      DEFAULT_RELIANCE_DISCLAIMER_HE,
+  };
+}
+
+/**
+ * שליפת רשימת מסגרות (מנסה מול ה-Backend וממיר בבטחה ל-DTO של ה-Frontend)
  */
 export async function fetchDaycaresList(): Promise<DaycareDetailDto[]> {
   try {
-    const res = await fetch('/api/v1/daycares?mode=list&limit=200', {
+    const res = await fetch('/api/v1/daycares?format=list&page_size=200', {
       headers: { Accept: 'application/json' },
     });
     if (res.ok) {
       const data = await res.json();
       if (Array.isArray(data?.items) && data.items.length > 0) {
-        return data.items as DaycareDetailDto[];
+        const mapped = (data.items as Record<string, unknown>[]).map(
+          normalizeBackendListItem
+        );
+        inMemoryDaycares = structuredClone(mapped);
+        return mapped;
       }
     }
   } catch {
@@ -1068,7 +1472,7 @@ export async function fetchDaycaresList(): Promise<DaycareDetailDto[]> {
 }
 
 /**
- * שליפת פרופיל מלא של גן לפי מזהה
+ * שליפת פרופיל מלא של גן לפי מזהה (5 בלוקים מלאים מ-GET /api/v1/daycares/:id)
  */
 export async function fetchDaycareDetails(
   daycareId: string
@@ -1079,8 +1483,8 @@ export async function fetchDaycareDetails(
     });
     if (res.ok) {
       const data = await res.json();
-      if (data && data.id) {
-        return data as DaycareDetailDto;
+      if (data && (data.daycare || data.id)) {
+        return normalizeBackendDetailResponse(data as Record<string, unknown>);
       }
     }
   } catch {
@@ -1106,7 +1510,15 @@ export async function fetchAutocompleteLocations(
     if (res.ok) {
       const data = await res.json();
       if (Array.isArray(data?.suggestions) && data.suggestions.length > 0) {
-        return data.suggestions;
+        return (data.suggestions as Record<string, unknown>[]).map((s) => ({
+          kind: ((s.kind || s.type || 'daycare') as AutocompleteLocationDto['kind']),
+          label_he: String(s.label_he || s.label || ''),
+          sublabel_he: String(s.sublabel_he || s.city_name_he || ''),
+          city_code: Number(s.city_code || 5000),
+          lat: typeof s.lat === 'number' ? s.lat : null,
+          lon: typeof s.lon === 'number' ? s.lon : typeof s.lng === 'number' ? s.lng : null,
+          daycare_id: s.daycare_id ? String(s.daycare_id) : undefined,
+        }));
       }
     }
   } catch {
@@ -1155,46 +1567,119 @@ export async function fetchAutocompleteLocations(
   return suggestions.slice(0, 8);
 }
 
+function mapAgeGroupToBackend(
+  ageGroup: ReportItemPayload['age_group'] | string
+): string {
+  return ageGroup === '0_3_mixed' ? '0_3' : ageGroup;
+}
+
+function mapSizeBucketToBackend(item: ReportItemPayload): string {
+  if (item.reported_over_statutory_threshold === true) {
+    return item.age_group === '3_6' ? '11_or_more' : '7_or_more';
+  }
+  if (item.reported_over_statutory_threshold === false) {
+    return item.age_group === '3_6' ? 'up_to_10' : 'up_to_6';
+  }
+  return 'unknown';
+}
+
+function mapTriStateToBackend(val?: boolean | null): 'yes' | 'no' | 'unknown' {
+  if (val === true) return 'yes';
+  if (val === false) return 'no';
+  return 'unknown';
+}
+
 /**
- * אימות Google OIDC (Scope: openid בלבד) + שליחת דיווח מחיר ב-Blind Upsert
+ * אימות Google OIDC (Scope: openid בלבד) + שליחת דיווח מחיר לשרת ה-Backend
  */
 export async function submitParentReport(
   payload: ReportSubmissionPayload,
-  googleIdToken = 'demo_google_id_token_openid_only'
+  googleIdToken?: string
 ): Promise<{
   status: 'accepted';
   confirmation_message_he: string;
   updatedDaycare: DaycareDetailDto | null;
 }> {
+  const token = googleIdToken || (await obtainGoogleIdToken());
   try {
-    // ניסיון אימות OIDC ושליחה לשרת ה-Backend אם זמין
-    await fetch('/api/v1/auth/google', {
+    // 1. אימות OIDC והנפקת עוגיית סשן HttpOnly בשרת
+    const authRes = await fetch('/api/v1/auth/google', {
       method: 'POST',
+      credentials: 'same-origin',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({
-        id_token: googleIdToken,
+        id_token: token,
         turnstile_token: payload.turnstile_token,
       }),
     });
 
-    const res = await fetch('/api/v1/reports', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify(payload),
-    });
-    if (res.ok) {
-      const data = await res.json();
-      const refreshed = await fetchDaycareDetails(payload.daycare_id);
-      return {
-        status: 'accepted',
-        confirmation_message_he:
-          data.confirmation_message_he ||
-          'תודה! הדיווח נקלט במערכת בהצלחה ועדכן את מדד השקיפות של הגן.',
-        updatedDaycare: refreshed,
-      };
+    if (authRes.ok && payload.items.length > 0) {
+      let allSucceeded = true;
+      for (let i = 0; i < payload.items.length; i += 1) {
+        const item = payload.items[i];
+        const bodyPayload = {
+          daycare_id: payload.daycare_id,
+          school_year: item.school_year,
+          monthly_list_price_nis: Math.round(item.monthly_price_nis),
+          age_group: mapAgeGroupToBackend(item.age_group),
+          framework_track: item.is_municipal_tzaharon_only
+            ? 'municipal_tzaharon'
+            : 'private_full_day',
+          hours_sun_thu_start: item.start_time_weekday,
+          hours_sun_thu_end: item.end_time_weekday,
+          includes_friday: item.includes_friday,
+          hours_fri_start: item.includes_friday ? item.friday_start_time : null,
+          hours_fri_end: item.includes_friday ? item.friday_end_time : null,
+          includes_nutrition: item.includes_nutrition,
+          reported_size_bucket: mapSizeBucketToBackend(item),
+          reported_shelter_status: mapTriStateToBackend(
+            item.reported_has_shelter
+          ),
+          reported_cameras_0_3:
+            item.age_group === '3_6'
+              ? 'unknown'
+              : mapTriStateToBackend(item.reported_has_cameras),
+          is_standard_list_price_confirmed: payload.legal_declaration_accepted,
+          confirm_outlier: item.outlier_confirmed_by_user,
+          replace_all_ages_for_token: i === 0,
+          turnstile_token: payload.turnstile_token,
+        };
+
+        let res = await fetch('/api/v1/reports', {
+          method: 'POST',
+          credentials: 'same-origin',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify(bodyPayload),
+        });
+
+        // אם השרת ביקש אישור חריגה (>40%) והמשתמש כבר אישר בשלב 2 או שהשרת מחזיר 409 — מאשרים בשליחה השנייה על סמך העוגייה
+        if (res.status === 409) {
+          res = await fetch('/api/v1/reports', {
+            method: 'POST',
+            credentials: 'same-origin',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ ...bodyPayload, confirm_outlier: true }),
+          });
+        }
+
+        if (!res.ok) {
+          allSucceeded = false;
+          break;
+        }
+      }
+
+      if (allSucceeded) {
+        const refreshed = await fetchDaycareDetails(payload.daycare_id);
+        return {
+          status: 'accepted',
+          confirmation_message_he:
+            'תודה! הדיווח נקלט במערכת בהצלחה ועדכן את מדד המחיר של הגן.',
+          updatedDaycare: refreshed,
+        };
+      }
     }
   } catch {
-    // Fallback to local state update
+    // Fallback to local state update when backend is offline
   }
 
   // עדכון מיידי של המאגר המקומי בזיכרון כדי שהמשתמש יראה את הסיכה והכרטיס מתעדכנים מיד
@@ -1207,16 +1692,10 @@ export async function submitParentReport(
       '0_3_mixed': 'רב-גילי (לידה עד 3)',
       '3_6': 'גני ילדים וצהרונים (3–6)',
     };
-    const yearLabels: Record<number, string> = {
-      2025: 'תשפ"ה (2024–2025)',
-      2026: 'תשפ"ו (2025–2026)',
-      2027: 'תשפ"ז (2026–2027)',
-    };
-
     for (const item of payload.items) {
       target.individual_reports.unshift({
         school_year: item.school_year,
-        school_year_label: yearLabels[item.school_year] || 'תשפ"ז (2026–2027)',
+        school_year_label: formatHebrewSchoolYear(item.school_year),
         age_group: item.age_group,
         age_group_label_he: ageLabels[item.age_group] || 'לידה עד 3',
         monthly_price_nis: item.monthly_price_nis,
@@ -1281,33 +1760,62 @@ export async function submitParentReport(
   return {
     status: 'accepted',
     confirmation_message_he:
-      'תודה! הדיווח נקלט במערכת בהצלחה במנגנון שומר פרטיות (Blind Upsert ללא שמירת מייל) ועדכן את מדד המחיר של הגן.',
+      'תודה! הדיווח נקלט במערכת בהצלחה ועדכן את מדד המחיר של הגן.',
     updatedDaycare: target ? structuredClone(target) : null,
   };
 }
 
 /**
- * ביטול דיווח עצמי עיוור (Blind Withdraw — D-38)
+ * ביטול דיווח עצמי לגן (עם תמיכה באפשרות לביטול שכבת גיל ספציפית)
  */
 export async function withdrawParentReport(payload: {
   daycare_id: string;
-  school_year: 2025 | 2026 | 2027;
+  school_year: number;
+  age_group?: string | null;
   turnstile_token: string;
-}): Promise<{ status: 'accepted'; confirmation_message_he: string }> {
+}): Promise<{
+  status: 'accepted';
+  confirmation_message_he: string;
+  updatedDaycare: DaycareDetailDto | null;
+}> {
+  const token = await obtainGoogleIdToken();
   try {
-    const res = await fetch('/api/v1/reports/withdraw', {
+    const authRes = await fetch('/api/v1/auth/google', {
       method: 'POST',
+      credentials: 'same-origin',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify(payload),
+      body: JSON.stringify({
+        id_token: token,
+        turnstile_token: payload.turnstile_token,
+      }),
     });
-    if (res.ok) {
-      const data = await res.json();
-      return {
-        status: 'accepted',
-        confirmation_message_he:
-          data.confirmation_message_he ||
-          'בקשת הביטול עובדה בהצלחה. אם היה קיים דיווח המשויך לחשבונך עבור גן זה ושנת הלימודים שנבחרה, הוא הוסר מחישוב המחירים הפומבי.',
-      };
+
+    if (authRes.ok) {
+      const res = await fetch('/api/v1/reports/withdraw', {
+        method: 'POST',
+        credentials: 'same-origin',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          daycare_id: payload.daycare_id,
+          school_year: payload.school_year,
+          age_group: payload.age_group
+            ? mapAgeGroupToBackend(payload.age_group)
+            : undefined,
+          turnstile_token: payload.turnstile_token,
+        }),
+      });
+      if (res.ok) {
+        const data = await res.json();
+        const refreshed = await fetchDaycareDetails(payload.daycare_id);
+        return {
+          status: 'accepted',
+          confirmation_message_he:
+            data.message_he ||
+            data.confirmation_message_he ||
+            'בקשת הביטול עובדה בהצלחה. אם היה קיים דיווח המשויך לחשבונך עבור גן זה ושנת הלימודים שנבחרה, הוא הוסר מחישוב המחירים הפומבי.',
+          updatedDaycare: refreshed,
+        };
+      }
     }
   } catch {
     // Fallback
@@ -1316,7 +1824,8 @@ export async function withdrawParentReport(payload: {
   return {
     status: 'accepted',
     confirmation_message_he:
-      'בקשת הביטול עובדה בהצלחה (Blind Withdraw). אם היה קיים דיווח המשויך לחשבונך עבור גן זה ושנת הלימודים שנבחרה, הוא הוסר מחישוב המחירים הפומבי.',
+      'בקשת הביטול עובדה בהצלחה. אם היה קיים דיווח המשויך לחשבונך עבור גן זה ושנת הלימודים שנבחרה, הוא הוסר מחישוב המחירים הפומבי.',
+    updatedDaycare: null,
   };
 }
 
@@ -1330,15 +1839,21 @@ export async function submitCorrectionRequest(
     const res = await fetch('/api/v1/corrections', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify(payload),
+      body: JSON.stringify({
+        daycare_id: payload.daycare_id,
+        issue_category: payload.error_category,
+        structured_details: {
+          submitter_role: payload.submitter_role,
+          selected_field_notes_code: payload.selected_field_notes_code || null,
+          details_text: payload.details_text || null,
+        },
+        turnstile_token: payload.turnstile_token,
+      }),
     });
     if (res.ok) {
-      const data = await res.json();
       return {
         status: 'accepted',
-        confirmation_message_he:
-          data.confirmation_message_he ||
-          'תודה! הפנייה המובנית נקלטה בתור הבקרה ותיבדק מול מאגרי המקור הרשמיים.',
+        confirmation_message_he: 'תודה! הפנייה נקלטה ותיבדק.',
       };
     }
   } catch {
@@ -1347,7 +1862,6 @@ export async function submitCorrectionRequest(
 
   return {
     status: 'accepted',
-    confirmation_message_he:
-      'תודה! הפנייה המובנית נקלטה בתור הבקרה ותיבדק מול מאגרי המקור הרשמיים.',
+    confirmation_message_he: 'תודה! הפנייה נקלטה ותיבדק.',
   };
 }

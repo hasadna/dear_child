@@ -3,6 +3,10 @@ import { AppHeader, MapColorMode } from './components/shell/AppHeader';
 import { ActiveFilters, FiltersBar } from './components/shell/FiltersBar';
 import { DaycareListTable } from './components/shell/DaycareListTable';
 import { OnboardingModal } from './components/shell/OnboardingModal';
+import { ParentGuideModal } from './components/shell/ParentGuideModal';
+import { TermsAndPrivacyModal } from './components/shell/TermsAndPrivacyModal';
+import { ApiAndMcpModal } from './components/shell/ApiAndMcpModal';
+import { ErrorBoundary } from './components/shell/ErrorBoundary';
 import { DaycareMap } from './components/map/DaycareMap';
 import { DaycareProfileModal } from './components/daycare/DaycareProfileModal';
 import { ParentReportWizardModal } from './components/crowdsourcing/ParentReportWizardModal';
@@ -10,11 +14,12 @@ import { CorrectionRequestModal } from './components/crowdsourcing/CorrectionReq
 import {
   AutocompleteLocationDto,
   DaycareDetailDto,
+  fetchDaycareDetails,
   fetchDaycaresList,
   filterDaycaresClientSide,
 } from './services/api-client';
 
-export const App: React.FC = () => {
+const DearChildWorkspace: React.FC = () => {
   const [allDaycares, setAllDaycares] = useState<DaycareDetailDto[]>([]);
   const [colorMode, setColorMode] = useState<MapColorMode>('relative_price');
   const [selectedId, setSelectedId] = useState<string | null>(null);
@@ -25,11 +30,14 @@ export const App: React.FC = () => {
     zoom?: number;
   } | null>(null);
 
-  // תצוגת מובייל: מעבר בין מפה לטבלה
+  // תצוגת מובייל וטאבלט צר: מעבר בין מפה לטבלה
   const [mobilePane, setMobilePane] = useState<'list' | 'map'>('list');
 
   // מודאלים
   const [onboardingOpen, setOnboardingOpen] = useState<boolean>(false);
+  const [parentGuideOpen, setParentGuideOpen] = useState<boolean>(false);
+  const [termsOpen, setTermsOpen] = useState<boolean>(false);
+  const [apiMcpOpen, setApiMcpOpen] = useState<boolean>(false);
   const [profileDaycare, setProfileDaycare] =
     useState<DaycareDetailDto | null>(null);
   const [reportModalState, setReportModalState] = useState<{
@@ -52,11 +60,30 @@ export const App: React.FC = () => {
     features: [],
   });
 
+  // פתיחת כרטיס גן מלא עם טעינת נתוני 5 הבלוקים מה-Backend
+  const handleOpenFullProfile = async (daycare: DaycareDetailDto) => {
+    setProfileDaycare(daycare);
+    const detailed = await fetchDaycareDetails(daycare.id);
+    if (detailed) {
+      setProfileDaycare(detailed);
+    }
+  };
+
   useEffect(() => {
     fetchDaycaresList().then((items) => {
       setAllDaycares(items);
-      if (items.length > 0) {
-        setSelectedId(items[0].id);
+
+      // תמיכה בקישור שיתוף ישיר (?daycare=<id>)
+      const params = new URLSearchParams(window.location.search);
+      const sharedDaycareId = params.get('daycare');
+      if (sharedDaycareId) {
+        const found = items.find((it) => it.id === sharedDaycareId);
+        if (found) {
+          setSelectedId(found.id);
+          setFlyToTarget({ lat: found.lat, lon: found.lon, zoom: 16 });
+          handleOpenFullProfile(found);
+          return;
+        }
       }
     });
   }, []);
@@ -148,9 +175,10 @@ export const App: React.FC = () => {
     const escapeCsv = (val: string) => `"${String(val).replace(/"/g, '""')}"`;
     const csvContent =
       '\uFEFF' +
-      [headers.map(escapeCsv).join(','), ...rows.map((r) => r.map(escapeCsv).join(','))].join(
-        '\r\n'
-      );
+      [
+        headers.map(escapeCsv).join(','),
+        ...rows.map((r) => r.map(escapeCsv).join(',')),
+      ].join('\r\n');
 
     const blob = new Blob([csvContent], { type: 'text/csv;charset=utf-8;' });
     const url = URL.createObjectURL(blob);
@@ -166,24 +194,24 @@ export const App: React.FC = () => {
   return (
     <div className="app-root">
       <AppHeader
-        colorMode={colorMode}
-        onColorModeChange={setColorMode}
         onOpenReportModal={() =>
           setReportModalState({
             open: true,
-            daycare:
-              allDaycares.find((d) => d.id === selectedId) ||
-              allDaycares[0] ||
-              null,
+            daycare: null,
             withdrawMode: false,
           })
         }
         onOpenOnboardingModal={() => setOnboardingOpen(true)}
+        onOpenParentGuideModal={() => setParentGuideOpen(true)}
+        onOpenTermsModal={() => setTermsOpen(true)}
+        onOpenApiMcpModal={() => setApiMcpOpen(true)}
       />
 
       <main className="main-workspace">
         <FiltersBar
           filters={filters}
+          colorMode={colorMode}
+          onColorModeChange={setColorMode}
           onFiltersChange={setFilters}
           onSelectAutocompleteSuggestion={handleAutocompleteSelect}
         />
@@ -197,7 +225,7 @@ export const App: React.FC = () => {
             cityMedianPriceNis={cityMedianPriceNis}
             onSelectId={handleSelectIdFromTable}
             onHoverId={setHoveredId}
-            onOpenFullProfile={(daycare) => setProfileDaycare(daycare)}
+            onOpenFullProfile={handleOpenFullProfile}
             onReportForDaycare={(daycare) =>
               setReportModalState({
                 open: true,
@@ -218,7 +246,7 @@ export const App: React.FC = () => {
             cityMedianPriceNis={cityMedianPriceNis}
             flyToTarget={flyToTarget}
             onSelectDaycare={(daycare) => setSelectedId(daycare.id)}
-            onOpenFullProfile={(daycare) => setProfileDaycare(daycare)}
+            onOpenFullProfile={handleOpenFullProfile}
             onReportPriceForDaycare={(daycare) =>
               setReportModalState({
                 open: true,
@@ -229,7 +257,7 @@ export const App: React.FC = () => {
           />
         </div>
 
-        {/* כפתור צף למובייל למעבר בין מפה לרשימה */}
+        {/* כפתור צף למובייל וטאבלט צר למעבר בין מפה לרשימה */}
         <div
           className="mobile-floating-view-toggle"
           role="group"
@@ -297,17 +325,33 @@ export const App: React.FC = () => {
       <OnboardingModal
         open={onboardingOpen}
         onCloseAndSearch={() => setOnboardingOpen(false)}
-        onOpenReportFlow={() => {
-          setOnboardingOpen(false);
-          setReportModalState({
-            open: true,
-            daycare: allDaycares[0] || null,
-            withdrawMode: false,
-          });
-        }}
+      />
+
+      {/* מודאל מדריך רישוי ופיקוח להורים */}
+      <ParentGuideModal
+        open={parentGuideOpen}
+        onClose={() => setParentGuideOpen(false)}
+      />
+
+      {/* מודאל תנאי שימוש ופרטיות (טיוטה) */}
+      <TermsAndPrivacyModal
+        open={termsOpen}
+        onClose={() => setTermsOpen(false)}
+      />
+
+      {/* מודאל הסבר על Public REST API ושרת MCP */}
+      <ApiAndMcpModal
+        open={apiMcpOpen}
+        onClose={() => setApiMcpOpen(false)}
       />
     </div>
   );
 };
+
+export const App: React.FC = () => (
+  <ErrorBoundary>
+    <DearChildWorkspace />
+  </ErrorBoundary>
+);
 
 export default App;

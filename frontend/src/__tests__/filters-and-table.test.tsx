@@ -1,7 +1,10 @@
 import { fireEvent, render, screen } from '@testing-library/react';
 import { describe, expect, it, vi } from 'vitest';
 import { FiltersBar, ActiveFilters } from '../components/shell/FiltersBar';
-import { DaycareListTable } from '../components/shell/DaycareListTable';
+import {
+  DaycareListTable,
+  formatCompactAgeRange,
+} from '../components/shell/DaycareListTable';
 import { DaycareDetailDto } from '../services/api-client';
 
 const SAMPLE_ITEM: DaycareDetailDto = {
@@ -143,16 +146,36 @@ describe('FiltersBar & DaycareListTable', () => {
     expect(toggleBtn).toHaveClass('expanded');
   });
 
-  it('renders DaycareListTable rows, expands details and invokes profile/report/error/export callbacks', () => {
+  it('merges contiguous and non-contiguous age groups into compact numeric ranges', () => {
+    expect(formatCompactAgeRange(['0_1', '1_2', '2_3'])).toBe('0–3');
+    expect(formatCompactAgeRange(['0_1', '1_2', '2_3', '3_6'])).toBe('0–6');
+    expect(formatCompactAgeRange(['1_2', '3_6'])).toBe('1–2, 3–6');
+    expect(formatCompactAgeRange(['0_3_mixed'])).toBe('0–3');
+    expect(formatCompactAgeRange(['3_6'])).toBe('3–6');
+  });
+
+  it('renders streamlined DaycareListTable columns, compact prices, subsidy badge, Maps/tel links, and concise expanded card', () => {
     const onSelectId = vi.fn();
     const onOpenFullProfile = vi.fn();
     const onReport = vi.fn();
     const onFlagError = vi.fn();
-    const onExportCsv = vi.fn();
+    const onExportExcel = vi.fn();
+
+    const subsidizedNoPriceItem: DaycareDetailDto = {
+      ...SAMPLE_ITEM,
+      id: 'test-daycare-2',
+      name: 'מעון ויצו',
+      target_age_groups: ['0_1', '1_2', '2_3'],
+      is_subsidized: true,
+      display_mode: 'no_price',
+      headline_price_nis: null,
+      active_reports_count: 0,
+      price_formatted_he: 'טרם דווח מחיר',
+    };
 
     render(
       <DaycareListTable
-        items={[SAMPLE_ITEM]}
+        items={[SAMPLE_ITEM, subsidizedNoPriceItem]}
         selectedId={SAMPLE_ITEM.id}
         hoveredId={null}
         cityMedianPriceNis={5400}
@@ -161,13 +184,53 @@ describe('FiltersBar & DaycareListTable', () => {
         onOpenFullProfile={onOpenFullProfile}
         onReportForDaycare={onReport}
         onFlagErrorForDaycare={onFlagError}
-        onExportCsv={onExportCsv}
+        onExportExcel={onExportExcel}
       />
     );
 
-    expect(screen.getByText('מעון כוכב הצפון')).toBeInTheDocument();
+    // Updated summary bar text (count removed since total-tag already shows it)
+    expect(screen.queryByText(/נמצאו/)).not.toBeInTheDocument();
+    expect(screen.getByText(/חציון מחיר באזור:/)).toHaveTextContent(
+      'חציון מחיר באזור: ₪5,400'
+    );
 
-    fireEvent.click(screen.getByRole('button', { name: /כרטיס גן מלא/ }));
+    // 4 clean content columns (no separate "סבסוד" column, renamed to "שם וכתובת")
+    expect(screen.getByText('שם וכתובת')).toBeInTheDocument();
+    expect(screen.queryByText('שם מזהה ויישוב')).not.toBeInTheDocument();
+    expect(
+      screen.queryByRole('columnheader', { name: 'סבסוד' })
+    ).not.toBeInTheDocument();
+
+    // Compact numeric age ranges & concise prices + subsidy badge
+    expect(screen.getByText('1–2')).toBeInTheDocument();
+    expect(screen.getByText('0–3')).toBeInTheDocument();
+    expect(screen.getByText('₪5,600')).toBeInTheDocument();
+    expect(screen.getByText('✓ 4 דיווחים')).toBeInTheDocument();
+    expect(screen.getByText('טרם דווח')).toBeInTheDocument();
+    expect(screen.getByText('מסובסד')).toBeInTheDocument();
+
+    // Expanded quick card omits official licensing text & MOE symbol (kept in full profile)
+    expect(screen.queryByText(/סטטוס רישוי רשמי/)).not.toBeInTheDocument();
+    expect(screen.queryByText(/סמל מעון \/ מוסד/)).not.toBeInTheDocument();
+
+    // Clickable Google Maps address link & tel phone link
+    const mapsLink = screen.getByRole('link', {
+      name: /ארלוזורוב 42, תל אביב - יפו/,
+    });
+    expect(mapsLink).toHaveAttribute(
+      'href',
+      expect.stringContaining('https://www.google.com/maps/search/')
+    );
+    expect(mapsLink).toHaveAttribute('target', '_blank');
+
+    const phoneLink = screen.getByRole('link', { name: /03-5551234/ });
+    expect(phoneLink).toHaveAttribute('href', 'tel:03-5551234');
+
+    // Concise action buttons + icon-only share button
+    const profileBtn = screen.getByRole('button', { name: /כרטיס גן מלא/ });
+    expect(profileBtn).toHaveTextContent('כרטיס גן מלא');
+    expect(profileBtn).not.toHaveTextContent('השוואה והיסטוריה');
+    fireEvent.click(profileBtn);
     expect(onOpenFullProfile).toHaveBeenCalledWith(SAMPLE_ITEM);
 
     fireEvent.click(screen.getByRole('button', { name: /דווחו \/ עדכנו מחיר/ }));
@@ -176,7 +239,12 @@ describe('FiltersBar & DaycareListTable', () => {
     fireEvent.click(screen.getByRole('button', { name: /מצאתם טעות/ }));
     expect(onFlagError).toHaveBeenCalledWith(SAMPLE_ITEM);
 
-    fireEvent.click(screen.getByRole('button', { name: /ייצוא/ }));
-    expect(onExportCsv).toHaveBeenCalledTimes(1);
+    expect(screen.getByRole('button', { name: 'שיתוף' })).toBeInTheDocument();
+
+    const exportBtn = screen.getByRole('button', { name: /ייצוא.*אקסל/ });
+    expect(exportBtn).toHaveTextContent('ייצוא לאקסל');
+    expect(exportBtn).not.toHaveTextContent(/CSV/i);
+    fireEvent.click(exportBtn);
+    expect(onExportExcel).toHaveBeenCalledTimes(1);
   });
 });

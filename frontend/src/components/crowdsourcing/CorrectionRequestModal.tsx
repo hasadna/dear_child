@@ -1,9 +1,10 @@
-import React, { useState } from 'react';
+import React, { useEffect, useState } from 'react';
 import {
   CorrectionRequestPayload,
   DaycareDetailDto,
   submitCorrectionRequest,
 } from '../../services/api-client';
+import { useModalDismiss } from '../shell/useModalDismiss';
 
 interface CorrectionRequestModalProps {
   daycare: DaycareDetailDto | null;
@@ -13,60 +14,86 @@ interface CorrectionRequestModalProps {
 const ERROR_CATEGORIES: {
   code: CorrectionRequestPayload['error_category'];
   label: string;
-  desc: string;
 }[] = [
   {
     code: 'wrong_price_outlier',
     label: 'המחיר המוצג שגוי או חריג',
-    desc: 'המחיר אינו משקף את מחיר המחירון הכללי של המסגרת לשנה זו.',
   },
   {
     code: 'daycare_closed',
     label: 'המעון / הגן נסגר ואינו פעיל עוד',
-    desc: 'המסגרת הפסיקה את פעילותה בכתובת זו.',
   },
   {
     code: 'wrong_address_or_location',
     label: 'כתובת או מיקום הסיכה במפה אינם מדויקים',
-    desc: 'המסגרת פועלת בכתובת אחרת או שהקואורדינטות שגויות.',
   },
   {
     code: 'wrong_license_status',
     label: 'סטטוס הרישוי או הסבסוד השתנה',
-    desc: 'קיים עדכון במרשם משרד החינוך / העבודה שטרם השתקף בכרטיס.',
   },
   {
     code: 'other_factual_error',
     label: 'טעות עובדתית אחרת בפרטי המסגרת',
-    desc: 'שעות פעילות, שכבת גיל או סמל מוסד שגויים.',
   },
 ];
 
+interface CorrectionFieldErrors {
+  errorCategory?: string;
+  submitterRole?: string;
+}
+
 /**
- * מודאל מובנה לדיווח על טעות בנתוני גן ("מצאתם טעות?") — docs/06_ui_ux_and_cartography_spec.md סעיף 6
- * ללא שדה טקסט חופשי וללא איסוף מידע אישי (מניעת לשון הרע וציות לתיקון 13).
+ * מודאל לדיווח על טעות בנתוני גן ("מצאתם טעות?")
+ * כל שדות החובה מתחילים ריקים ונבדקים בלחיצה על שליחה; תיבת הפירוט מועברת לבדיקה פנימית בלבד ואינה מתפרסמת לציבור.
  */
 export const CorrectionRequestModal: React.FC<CorrectionRequestModalProps> = ({
   daycare,
   onClose,
 }) => {
-  const [errorCategory, setErrorCategory] =
-    useState<CorrectionRequestPayload['error_category']>('wrong_price_outlier');
-  const [submitterRole, setSubmitterRole] =
-    useState<CorrectionRequestPayload['submitter_role']>('parent');
+  const [errorCategory, setErrorCategory] = useState<
+    CorrectionRequestPayload['error_category'] | null
+  >(null);
+  const [submitterRole, setSubmitterRole] = useState<
+    CorrectionRequestPayload['submitter_role'] | null
+  >(null);
+  const [detailsText, setDetailsText] = useState<string>('');
+  const [fieldErrors, setFieldErrors] = useState<CorrectionFieldErrors>({});
   const [submitting, setSubmitting] = useState(false);
   const [doneMessage, setDoneMessage] = useState<string | null>(null);
+
+  useEffect(() => {
+    setDoneMessage(null);
+    setErrorCategory(null);
+    setSubmitterRole(null);
+    setDetailsText('');
+    setFieldErrors({});
+  }, [daycare?.id]);
+
+  useModalDismiss(daycare !== null, onClose);
 
   if (!daycare) return null;
 
   const handleSubmit = async () => {
+    const errors: CorrectionFieldErrors = {};
+    if (!errorCategory) {
+      errors.errorCategory = 'יש לבחור את מהות הטעות שמצאתם.';
+    }
+    if (!submitterRole) {
+      errors.submitterRole = 'יש לבחור מי מדווח/ת על הטעות.';
+    }
+    setFieldErrors(errors);
+    if (Object.keys(errors).length > 0 || !errorCategory || !submitterRole) {
+      return;
+    }
+
     setSubmitting(true);
     try {
       const res = await submitCorrectionRequest({
         daycare_id: daycare.id,
         error_category: errorCategory,
         submitter_role: submitterRole,
-        turnstile_token: 'turnstile_verified_token',
+        details_text: detailsText.trim() || undefined,
+        turnstile_token: 'turnstile_managed_background_token',
       });
       setDoneMessage(res.confirmation_message_he);
     } finally {
@@ -80,16 +107,21 @@ export const CorrectionRequestModal: React.FC<CorrectionRequestModalProps> = ({
       role="dialog"
       aria-modal="true"
       aria-labelledby="correction-modal-title"
+      onClick={(e) => {
+        if (e.target === e.currentTarget) onClose();
+      }}
     >
       <div className="wizard-modal-card">
-        <button
-          type="button"
-          className="modal-close-x"
-          aria-label="סגירת דיווח על טעות"
-          onClick={onClose}
-        >
-          ✕
-        </button>
+        <div className="modal-sticky-close-row">
+          <button
+            type="button"
+            className="modal-close-x-top"
+            aria-label="סגירת דיווח על טעות"
+            onClick={onClose}
+          >
+            ✕
+          </button>
+        </div>
 
         {doneMessage ? (
           <div className="wizard-confirmation-screen">
@@ -110,13 +142,20 @@ export const CorrectionRequestModal: React.FC<CorrectionRequestModalProps> = ({
               🚩 מצאתם טעות בנתוני המסגרת?
             </h2>
             <p className="wizard-subtitle">
-              דיווח מובנה לבדיקת צוות הבקרה של הסדנא לידע ציבורי עבור{' '}
-              <strong>{daycare.name}</strong> ({daycare.address}):
+              דיווח לבדיקה עבור <strong>{daycare.name}</strong> ({daycare.address}):
             </p>
 
+            <div className="required-legend-note">
+              <span className="required-star">*</span> שדה חובה
+            </div>
+
             <div className="form-field-group">
-              <label className="field-label">מהי מהות הטעות שמצאתם?</label>
-              <div className="daycare-picker-list">
+              <label className="field-label">
+                מהי מהות הטעות שמצאתם? <span className="required-star">*</span>
+              </label>
+              <div
+                className={`daycare-picker-list ${fieldErrors.errorCategory ? 'field-invalid-group' : ''}`}
+              >
                 {ERROR_CATEGORIES.map((cat) => (
                   <div
                     key={cat.code}
@@ -126,32 +165,54 @@ export const CorrectionRequestModal: React.FC<CorrectionRequestModalProps> = ({
                     className={`daycare-picker-item ${
                       errorCategory === cat.code ? 'selected' : ''
                     }`}
-                    onClick={() => setErrorCategory(cat.code)}
+                    onClick={() => {
+                      setErrorCategory(cat.code);
+                      setFieldErrors((prev) => ({
+                        ...prev,
+                        errorCategory: undefined,
+                      }));
+                    }}
                     onKeyDown={(e) => {
                       if (e.key === 'Enter' || e.key === ' ') {
                         e.preventDefault();
                         setErrorCategory(cat.code);
+                        setFieldErrors((prev) => ({
+                          ...prev,
+                          errorCategory: undefined,
+                        }));
                       }
                     }}
                   >
-                    <div>
-                      <strong>{cat.label}</strong>
-                      <div className="picker-item-sub">{cat.desc}</div>
-                    </div>
+                    <strong>{cat.label}</strong>
                   </div>
                 ))}
               </div>
+              {fieldErrors.errorCategory && (
+                <div className="field-error-note">
+                  {fieldErrors.errorCategory}
+                </div>
+              )}
             </div>
 
             <div className="form-field-group">
-              <label className="field-label">מי מדווח/ת על הטעות?</label>
-              <div className="pill-radio-group">
+              <label className="field-label">
+                מי מדווח/ת על הטעות? <span className="required-star">*</span>
+              </label>
+              <div
+                className={`pill-radio-group ${fieldErrors.submitterRole ? 'field-invalid-group' : ''}`}
+              >
                 <button
                   type="button"
                   className={`pill-choice-btn ${
                     submitterRole === 'parent' ? 'selected' : ''
                   }`}
-                  onClick={() => setSubmitterRole('parent')}
+                  onClick={() => {
+                    setSubmitterRole('parent');
+                    setFieldErrors((prev) => ({
+                      ...prev,
+                      submitterRole: undefined,
+                    }));
+                  }}
                 >
                   הורה במסגרת
                 </button>
@@ -160,7 +221,13 @@ export const CorrectionRequestModal: React.FC<CorrectionRequestModalProps> = ({
                   className={`pill-choice-btn ${
                     submitterRole === 'daycare_operator' ? 'selected' : ''
                   }`}
-                  onClick={() => setSubmitterRole('daycare_operator')}
+                  onClick={() => {
+                    setSubmitterRole('daycare_operator');
+                    setFieldErrors((prev) => ({
+                      ...prev,
+                      submitterRole: undefined,
+                    }));
+                  }}
                 >
                   מנהל/ת או בעל/ת המסגרת
                 </button>
@@ -169,11 +236,37 @@ export const CorrectionRequestModal: React.FC<CorrectionRequestModalProps> = ({
                   className={`pill-choice-btn ${
                     submitterRole === 'researcher_or_public' ? 'selected' : ''
                   }`}
-                  onClick={() => setSubmitterRole('researcher_or_public')}
+                  onClick={() => {
+                    setSubmitterRole('researcher_or_public');
+                    setFieldErrors((prev) => ({
+                      ...prev,
+                      submitterRole: undefined,
+                    }));
+                  }}
                 >
                   חוקר/ת או ציבור רחב
                 </button>
               </div>
+              {fieldErrors.submitterRole && (
+                <div className="field-error-note">
+                  {fieldErrors.submitterRole}
+                </div>
+              )}
+            </div>
+
+            <div className="form-field-group">
+              <label className="field-label" htmlFor="correction-details-input">
+                פירוט הטעות
+              </label>
+              <textarea
+                id="correction-details-input"
+                className="wizard-textarea"
+                rows={3}
+                maxLength={500}
+                placeholder="פרטו עובדתית מה שגוי ומה הנתון הנכון (ללא פרטים אישיים מזהים)..."
+                value={detailsText}
+                onChange={(e) => setDetailsText(e.target.value)}
+              />
             </div>
 
             <div className="wizard-footer-nav">

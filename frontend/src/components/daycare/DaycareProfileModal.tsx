@@ -1,5 +1,11 @@
-import React from 'react';
+import React, { useState } from 'react';
 import { DaycareDetailDto } from '../../services/api-client';
+import {
+  formatHebrewYearShort,
+  getActiveSchoolYear,
+  MIN_REPORTABLE_SCHOOL_YEAR,
+} from '../../utils/school-years';
+import { useModalDismiss } from '../shell/useModalDismiss';
 
 interface DaycareProfileModalProps {
   daycare: DaycareDetailDto | null;
@@ -22,12 +28,48 @@ export const DaycareProfileModal: React.FC<DaycareProfileModalProps> = ({
   onOpenReportModal,
   onOpenCorrectionModal,
 }) => {
+  const [copiedShare, setCopiedShare] = useState(false);
+  useModalDismiss(daycare !== null, onClose);
+
   if (!daycare) return null;
 
+  const priceCohorts = daycare.price_cohorts || [];
+  const relativeBenchmarks = daycare.relative_benchmarks || [];
+  const yoyHistory = daycare.yoy_price_history || [];
+  const individualReports = daycare.individual_reports || [];
+  const regulatedComparison = daycare.regulated_benchmark_comparison || {
+    regulated_symbol_max_price_nis: 2515,
+    annual_gap_11_months_nis: null,
+    summary_he: 'תעריף מעון סמל מפוקח להשוואה: ₪2,515 לחודש.',
+  };
+
   const maxHistoryPrice = Math.max(
-    ...daycare.yoy_price_history.map((h) => h.median_price_nis),
+    ...yoyHistory.map((h) => h.median_price_nis),
     6500
   );
+
+  const handleShareDaycare = async () => {
+    const shareUrl = `${window.location.origin}/?daycare=${encodeURIComponent(daycare.id)}`;
+    if (navigator.share) {
+      try {
+        await navigator.share({
+          title: `${daycare.name} — ילדי היקר`,
+          text: `${daycare.name} (${daycare.address}) — ${daycare.price_formatted_he}`,
+          url: shareUrl,
+        });
+        return;
+      } catch {
+        // cancelled
+      }
+    }
+    try {
+      await navigator.clipboard.writeText(shareUrl);
+      setCopiedShare(true);
+      setTimeout(() => setCopiedShare(false), 2500);
+    } catch {
+      // ignore
+    }
+  };
 
   return (
     <div
@@ -35,16 +77,21 @@ export const DaycareProfileModal: React.FC<DaycareProfileModalProps> = ({
       role="dialog"
       aria-modal="true"
       aria-labelledby="daycare-profile-title"
+      onClick={(e) => {
+        if (e.target === e.currentTarget) onClose();
+      }}
     >
       <div className="profile-modal-card">
-        <button
-          type="button"
-          className="modal-close-x"
-          aria-label="סגירת כרטיס הגן"
-          onClick={onClose}
-        >
-          ✕
-        </button>
+        <div className="modal-sticky-close-row">
+          <button
+            type="button"
+            className="modal-close-x-top"
+            aria-label="סגירת כרטיס הגן"
+            onClick={onClose}
+          >
+            ✕
+          </button>
+        </div>
 
         {/* ====================================================================
             בלוק 1: כותרת רשמית, סמלי מוסד וסטטוס רישוי מוגן (Official Header)
@@ -114,7 +161,7 @@ export const DaycareProfileModal: React.FC<DaycareProfileModalProps> = ({
         <section className="profile-block" aria-label="מחיר חודשי משוקלל וצירי נרמול">
           <div className="block-header-row">
             <h3 className="block-title">
-              💰 בלוק 2: מחיר מחירון חודשי ומדיניות אמינות (D-31)
+              💰 מחיר מחירון חודשי ומדיניות אמינות
             </h3>
             <span className="trust-tier-tag">{daycare.trust_badge_he}</span>
           </div>
@@ -139,9 +186,9 @@ export const DaycareProfileModal: React.FC<DaycareProfileModalProps> = ({
             </button>
           </div>
 
-          {daycare.price_cohorts.length > 0 && (
+          {priceCohorts.length > 0 && (
             <div className="cohorts-grid">
-              {daycare.price_cohorts.map((cohort, idx) => (
+              {priceCohorts.map((cohort, idx) => (
                 <div key={idx} className="cohort-card">
                   <div className="cohort-card-top">
                     <strong>{cohort.age_group_label_he}</strong>
@@ -184,11 +231,11 @@ export const DaycareProfileModal: React.FC<DaycareProfileModalProps> = ({
             ==================================================================== */}
         <section className="profile-block" aria-label="השוואת מחיר יחסית לסביבה ולמעון מפוקח">
           <h3 className="block-title">
-            📊 בלוק 3: השוואה יחסית לשכונה, לעיר ולתעריף המפוקח (D-30)
+            📊 השוואה יחסית לשכונה, לעיר ולתעריף המפוקח
           </h3>
 
           <div className="benchmarks-list">
-            {daycare.relative_benchmarks.map((bm) => (
+            {relativeBenchmarks.map((bm) => (
               <div key={bm.scope} className="benchmark-row-card">
                 <div className="bm-label-col">
                   <strong>{bm.label_he}</strong>
@@ -222,8 +269,8 @@ export const DaycareProfileModal: React.FC<DaycareProfileModalProps> = ({
           </div>
 
           <div className="regulated-comparison-box">
-            <strong>🛡️ ייחוס מול תעריף מעון סמל מפוקח (₪{daycare.regulated_benchmark_comparison.regulated_symbol_max_price_nis.toLocaleString()} לחודש): </strong>
-            <span>{daycare.regulated_benchmark_comparison.summary_he}</span>
+            <strong>🛡️ ייחוס מול תעריף מעון סמל מפוקח (₪{regulatedComparison.regulated_symbol_max_price_nis.toLocaleString()} לחודש): </strong>
+            <span>{regulatedComparison.summary_he}</span>
           </div>
         </section>
 
@@ -232,17 +279,19 @@ export const DaycareProfileModal: React.FC<DaycareProfileModalProps> = ({
             ==================================================================== */}
         <section className="profile-block" aria-label="היסטוריית מחירים לאורך השנים">
           <h3 className="block-title">
-            📈 בלוק 4: היסטוריית מחירים רב-שנתית (תשפ״ה–תשפ״ז)
+            📈 היסטוריית מחירים רב-שנתית (
+            {formatHebrewYearShort(MIN_REPORTABLE_SCHOOL_YEAR)}–
+            {formatHebrewYearShort(getActiveSchoolYear())})
           </h3>
 
-          {daycare.yoy_price_history.length === 0 ? (
+          {yoyHistory.length === 0 ? (
             <p className="empty-block-note">
               טרם נצברו דיווחים היסטוריים רב-שנתיים למסגרת זו. ניתן לדווח גם על
-              שנות הלימודים תשפ״ה ותשפ״ו בטופס הדיווח!
+              שנות לימודים קודמות ועל השנה הבאה בטופס הדיווח!
             </p>
           ) : (
             <div className="yoy-chart-rows">
-              {daycare.yoy_price_history.map((point) => {
+              {yoyHistory.map((point) => {
                 const widthPct = Math.min(
                   100,
                   Math.max(20, Math.round((point.median_price_nis / maxHistoryPrice) * 100))
@@ -285,11 +334,10 @@ export const DaycareProfileModal: React.FC<DaycareProfileModalProps> = ({
             ==================================================================== */}
         <section className="profile-block" aria-label="פירוט דיווחי הורים וכתב ויתור">
           <h3 className="block-title">
-            🧾 בלוק 5: פירוט דיווחי הורים ומקורות ({daycare.individual_reports.length}{' '}
-            דיווחים)
+            🧾 פירוט דיווחי הורים ומקורות ({individualReports.length} דיווחים)
           </h3>
 
-          {daycare.individual_reports.length === 0 ? (
+          {individualReports.length === 0 ? (
             <p className="empty-block-note">
               טרם הוזנו דיווחי הורים למסגרת זו. לחצו על הכפתור למטה כדי להוסיף
               את הדיווח הראשון תוך 60 שניות!
@@ -309,7 +357,7 @@ export const DaycareProfileModal: React.FC<DaycareProfileModalProps> = ({
                   </tr>
                 </thead>
                 <tbody>
-                  {daycare.individual_reports.map((rep, idx) => (
+                  {individualReports.map((rep, idx) => (
                     <tr key={idx}>
                       <td>{rep.school_year_label}</td>
                       <td>
@@ -363,6 +411,13 @@ export const DaycareProfileModal: React.FC<DaycareProfileModalProps> = ({
               onClick={() => onOpenReportModal(daycare, false)}
             >
               + דווחו או עדכנו מחיר לגן זה
+            </button>
+            <button
+              type="button"
+              className="profile-action-btn secondary"
+              onClick={handleShareDaycare}
+            >
+              {copiedShare ? '✓ הקישור הועתק!' : '🔗 שיתוף כרטיס הגן'}
             </button>
             <button
               type="button"
