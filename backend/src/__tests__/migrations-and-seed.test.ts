@@ -8,15 +8,16 @@ import {
 } from '../db/seed-dictionaries.js';
 
 describe('Dear Child Database Schema & Migrations (Part 4.2)', () => {
-  it('loads all 5 SQL migrations in lexical order with valid SHA-256 checksums', () => {
+  it('loads all 6 SQL migrations in lexical order with valid SHA-256 checksums', () => {
     const migrations = loadMigrationFiles();
-    expect(migrations).toHaveLength(5);
+    expect(migrations).toHaveLength(6);
     expect(migrations.map((m) => m.version)).toEqual([
       '001_extensions_roles_and_enums',
       '002_geodictionaries_and_regulated_benchmarks',
       '003_daycares_and_external_sources',
       '004_app_private_nullifiers_and_blind_functions',
       '005_public_views_and_benchmark_functions',
+      '006_expand_price_range_and_withdraw_age_group',
     ]);
 
     const forbiddenBrandA = ['taf', 'map'].join('');
@@ -28,6 +29,10 @@ describe('Dear Child Database Schema & Migrations (Part 4.2)', () => {
       expect(m.sql.toLowerCase()).not.toContain(forbiddenBrandA);
       expect(m.sql.toLowerCase()).not.toContain(forbiddenBrandB);
     }
+
+    const migration006 = migrations[5].sql;
+    expect(migration006).toContain('BETWEEN 0 AND 50000');
+    expect(migration006).toContain('p_age_group');
   });
 
   it('enforces all D-34 and D-38 security, privacy, and aggregation guardrails in DDL', () => {

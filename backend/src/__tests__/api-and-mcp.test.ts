@@ -246,6 +246,109 @@ describe('Dear Child REST API, Blind Upsert/Withdraw, CLI Moderation & MCP Serve
     expect(withdrawAgainRes.statusCode).toBe(200);
     expect(withdrawAgainRes.json()).toEqual(withdrawRes.json());
 
+    // 5. Price range 0..50000 and next-year early registration validation
+    const zeroPriceRes = await app.inject({
+      method: 'POST',
+      url: '/api/v1/reports',
+      headers: { cookie: cookiePair },
+      payload: {
+        daycare_id: 'c1d2e3f4-5a6b-4c7d-8e9f-0a1b2c3d4e11',
+        school_year: 2028,
+        monthly_list_price_nis: 0,
+        age_group: '3_6',
+        framework_track: 'municipal_tzaharon',
+        hours_sun_thu_start: '07:30',
+        hours_sun_thu_end: '14:00',
+        includes_friday: false,
+        includes_nutrition: false,
+        is_standard_list_price_confirmed: true,
+        confirm_outlier: true,
+      },
+    });
+    expect(zeroPriceRes.statusCode).toBe(200);
+
+    const outOfRangeRes = await app.inject({
+      method: 'POST',
+      url: '/api/v1/reports',
+      headers: { cookie: cookiePair },
+      payload: {
+        daycare_id: 'c1d2e3f4-5a6b-4c7d-8e9f-0a1b2c3d4e11',
+        school_year: 2027,
+        monthly_list_price_nis: 50001,
+        age_group: '1_2',
+        framework_track: 'private_full_day',
+        hours_sun_thu_start: '07:30',
+        hours_sun_thu_end: '16:30',
+        includes_friday: true,
+        includes_nutrition: true,
+        is_standard_list_price_confirmed: true,
+        confirm_outlier: true,
+      },
+    });
+    expect(outOfRangeRes.statusCode).toBe(422);
+
+    // 6. Blind Withdraw with specific age_group removes only that cohort
+    await app.inject({
+      method: 'POST',
+      url: '/api/v1/reports',
+      headers: { cookie: cookiePair },
+      payload: {
+        daycare_id: 'c1d2e3f4-5a6b-4c7d-8e9f-0a1b2c3d4e11',
+        school_year: 2027,
+        monthly_list_price_nis: 5200,
+        age_group: '0_1',
+        framework_track: 'private_full_day',
+        hours_sun_thu_start: '07:30',
+        hours_sun_thu_end: '16:30',
+        includes_friday: true,
+        includes_nutrition: true,
+        is_standard_list_price_confirmed: true,
+        confirm_outlier: true,
+        replace_all_ages_for_token: true,
+      },
+    });
+    await app.inject({
+      method: 'POST',
+      url: '/api/v1/reports',
+      headers: { cookie: cookiePair },
+      payload: {
+        daycare_id: 'c1d2e3f4-5a6b-4c7d-8e9f-0a1b2c3d4e11',
+        school_year: 2027,
+        monthly_list_price_nis: 5100,
+        age_group: '2_3',
+        framework_track: 'private_full_day',
+        hours_sun_thu_start: '07:30',
+        hours_sun_thu_end: '16:30',
+        includes_friday: true,
+        includes_nutrition: true,
+        is_standard_list_price_confirmed: true,
+        confirm_outlier: true,
+        replace_all_ages_for_token: false,
+      },
+    });
+    const withdrawSingleAge = await app.inject({
+      method: 'POST',
+      url: '/api/v1/reports/withdraw',
+      headers: { cookie: cookiePair },
+      payload: {
+        daycare_id: 'c1d2e3f4-5a6b-4c7d-8e9f-0a1b2c3d4e11',
+        school_year: 2027,
+        age_group: '0_1',
+        turnstile_token: 'valid_turnstile_token',
+      },
+    });
+    expect(withdrawSingleAge.statusCode).toBe(200);
+    const afterPartialWithdraw = await app.inject({
+      method: 'GET',
+      url: '/api/v1/daycares/c1d2e3f4-5a6b-4c7d-8e9f-0a1b2c3d4e11',
+    });
+    const remainingAges = afterPartialWithdraw
+      .json()
+      .individual_reports.filter((r: { school_year: number }) => r.school_year === 2027)
+      .map((r: { age_group: string }) => r.age_group);
+    expect(remainingAges).not.toContain('0_1');
+    expect(remainingAges).toContain('2_3');
+
     await app.close();
   });
 

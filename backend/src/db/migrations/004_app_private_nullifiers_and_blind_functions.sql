@@ -19,7 +19,7 @@ CREATE TABLE IF NOT EXISTS app_private.survey_submissions (
     daycare_id                  UUID NOT NULL REFERENCES public.daycares(daycare_id) ON DELETE RESTRICT,
     
     -- שנת לימודים (למשל 2027 עבור תשפ"ז, 2026 עבור תשפ"ו, 2025 עבור תשפ"ה - D-30)
-    school_year                 SMALLINT NOT NULL CHECK (school_year BETWEEN 2020 AND 2035),
+    school_year                 SMALLINT NOT NULL CHECK (school_year BETWEEN 2020 AND 2100),
     
     -- Unlinkable Per-Daycare Nullifier (D-34, D-38): מתאפס ל-NULL בסוף שנת הלימודים!
     -- עבור רשומות Seed מפיילוט גיליון ת"א: NULL
@@ -30,7 +30,7 @@ CREATE TABLE IF NOT EXISTS app_private.survey_submissions (
     reported_month              CHAR(7) NOT NULL CHECK (reported_month ~ '^[0-9]{4}-(0[1-9]|1[0-2])$'),
     
     -- מחיר המחירון החודשי הרגיל ו-4 צירי הנרמול המחייבים (D-12, D-13, D-34, D-38)
-    monthly_list_price_nis      INTEGER NOT NULL CHECK (monthly_list_price_nis BETWEEN 500 AND 15000), -- Sanity Check קשיח!
+    monthly_list_price_nis      INTEGER NOT NULL CHECK (monthly_list_price_nis BETWEEN 0 AND 50000), -- Sanity Check קשיח!
     age_group                   public.age_group_enum NOT NULL,
     framework_track             public.framework_track_enum NOT NULL DEFAULT 'private_full_day',
     
@@ -191,7 +191,8 @@ $$;
 CREATE OR REPLACE FUNCTION app_private.withdraw_parent_report_blind(
     p_daycare_id    UUID,
     p_school_year   SMALLINT,
-    p_dedup_token   CHAR(64)
+    p_dedup_token   CHAR(64),
+    p_age_group     public.age_group_enum DEFAULT NULL
 ) RETURNS BOOLEAN
 LANGUAGE plpgsql
 SECURITY DEFINER
@@ -201,7 +202,8 @@ BEGIN
     DELETE FROM app_private.survey_submissions
     WHERE daycare_id = p_daycare_id
       AND school_year = p_school_year
-      AND dedup_token = p_dedup_token;
+      AND dedup_token = p_dedup_token
+      AND (p_age_group IS NULL OR age_group = p_age_group);
 
     RETURN TRUE;
 END;

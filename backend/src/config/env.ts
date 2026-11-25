@@ -1,3 +1,5 @@
+import { getActiveSchoolYear } from '../utils/school-years.js';
+
 export interface AppConfig {
   port: number;
   host: string;
@@ -25,7 +27,7 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): AppConfig {
     port: Number(env.PORT || 3000),
     host: env.HOST || '0.0.0.0',
     nodeEnv,
-    activeSchoolYear: Number(env.ACTIVE_SCHOOL_YEAR || 2027),
+    activeSchoolYear: Number(env.ACTIVE_SCHOOL_YEAR || getActiveSchoolYear()),
     databasePublicRoUrl: env.DATABASE_PUBLIC_RO_URL || defaultDbUrl,
     databaseBackendWriteUrl: env.DATABASE_BACKEND_WRITE_URL || defaultDbUrl,
     databaseEtlUrl: env.DATABASE_ETL_URL || defaultDbUrl,

@@ -10,6 +10,10 @@ import { DaycareAgeGroup } from '../etl/facilities-resolver.js';
 import { FrameworkTrack } from '../etl/official-sources-parsers.js';
 import { AuthVerifiers } from '../security/external-verifiers.js';
 import {
+  getMaxReportableSchoolYear,
+  MIN_REPORTABLE_SCHOOL_YEAR,
+} from '../utils/school-years.js';
+import {
   AUTH_COOKIE_NAME,
   decryptAuthSessionCookie,
   deriveDedupToken,
@@ -176,12 +180,16 @@ export async function registerAuthAndReportsRoutes(
         ? true
         : Boolean(body.replace_all_ages_for_token);
 
+    const maxReportableSchoolYear = getMaxReportableSchoolYear();
     if (
       !daycareId ||
       !isListPriceConfirmed ||
+      !Number.isInteger(schoolYear) ||
+      schoolYear < MIN_REPORTABLE_SCHOOL_YEAR ||
+      schoolYear > maxReportableSchoolYear ||
       !Number.isInteger(monthlyListPriceNis) ||
-      monthlyListPriceNis < 500 ||
-      monthlyListPriceNis > 15000 ||
+      monthlyListPriceNis < 0 ||
+      monthlyListPriceNis > 50000 ||
       !VALID_AGE_GROUPS.has(ageGroup) ||
       !VALID_TRACKS.has(frameworkTrack) ||
       !hoursSunThuStart ||
@@ -196,7 +204,7 @@ export async function registerAuthAndReportsRoutes(
       return {
         error_code: 'VALIDATION_ERROR',
         message_he:
-          'אחד או יותר משדות החובה אינם תקינים (מחיר חייב להיות בין 500 ל-15,000 ₪ עם אישור מחיר מחירון ו-4 צירי הנרמול).',
+          'אחד או יותר משדות החובה אינם תקינים (מחיר חייב להיות מספר שלם בין 0 ל-50,000 ₪ ושנת לימודים תקינה).',
       };
     }
 
@@ -315,12 +323,23 @@ export async function registerAuthAndReportsRoutes(
     const daycareId =
       typeof body.daycare_id === 'string' ? body.daycare_id.trim() : '';
     const schoolYear = Number(body.school_year || config.activeSchoolYear);
+    const rawAgeGroup =
+      typeof body.age_group === 'string' ? body.age_group.trim() : '';
+    const normalizedAgeGroup =
+      rawAgeGroup === '0_3_mixed'
+        ? ('0_3' as DaycareAgeGroup)
+        : (rawAgeGroup as DaycareAgeGroup);
+    const ageGroup = rawAgeGroup ? normalizedAgeGroup : null;
 
-    if (!daycareId || !Number.isInteger(schoolYear)) {
+    if (
+      !daycareId ||
+      !Number.isInteger(schoolYear) ||
+      (ageGroup !== null && !VALID_AGE_GROUPS.has(ageGroup))
+    ) {
       reply.code(422);
       return {
         error_code: 'VALIDATION_ERROR',
-        message_he: 'חסר מזהה מסגרת או שנת לימודים.',
+        message_he: 'חסר מזהה מסגרת, שנת לימודים או שכבת גיל תקינה.',
       };
     }
 
@@ -335,6 +354,7 @@ export async function registerAuthAndReportsRoutes(
       daycareId,
       schoolYear,
       dedupToken,
+      ageGroup,
     });
 
     // תשובה אחידה תמיד (200 OK — ללא חיווי אם היה קיים דיווח!)

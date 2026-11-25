@@ -337,6 +337,7 @@ export interface DaycareRepository {
     daycareId: string;
     schoolYear: number;
     dedupToken: string;
+    ageGroup?: DaycareAgeGroup | null;
   }): Promise<boolean>;
   createCorrectionRequest(params: {
     daycareId: string;
@@ -1634,13 +1635,15 @@ export class InMemoryDaycareRepository implements DaycareRepository {
     daycareId: string;
     schoolYear: number;
     dedupToken: string;
+    ageGroup?: DaycareAgeGroup | null;
   }): Promise<boolean> {
     for (let i = this.submissions.length - 1; i >= 0; i--) {
       const s = this.submissions[i];
       if (
         s.daycare_id === params.daycareId &&
         s.school_year === params.schoolYear &&
-        s.dedup_token === params.dedupToken
+        s.dedup_token === params.dedupToken &&
+        (!params.ageGroup || s.age_group === params.ageGroup)
       ) {
         this.submissions.splice(i, 1);
       }
@@ -1800,14 +1803,20 @@ export class PostgresDaycareRepository implements DaycareRepository {
     daycareId: string;
     schoolYear: number;
     dedupToken: string;
+    ageGroup?: DaycareAgeGroup | null;
   }): Promise<boolean> {
     await this.writePool.query(
       `
       SELECT app_private.withdraw_parent_report_blind(
-        $1::UUID, $2::SMALLINT, $3::CHAR(64)
+        $1::UUID, $2::SMALLINT, $3::CHAR(64), $4::public.age_group_enum
       )
       `,
-      [params.daycareId, params.schoolYear, params.dedupToken]
+      [
+        params.daycareId,
+        params.schoolYear,
+        params.dedupToken,
+        params.ageGroup || null,
+      ]
     );
     return true;
   }
