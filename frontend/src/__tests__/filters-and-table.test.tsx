@@ -167,6 +167,8 @@ describe('FiltersBar & DaycareListTable', () => {
       name: 'מעון ויצו',
       target_age_groups: ['0_1', '1_2', '2_3'],
       is_subsidized: true,
+      has_official_sanction: true,
+      official_sanction_text: 'הפעלה ללא רישיון בתוקף',
       display_mode: 'no_price',
       headline_price_nis: null,
       active_reports_count: 0,
@@ -208,6 +210,7 @@ describe('FiltersBar & DaycareListTable', () => {
     expect(screen.getByText('✓ 4 דיווחים')).toBeInTheDocument();
     expect(screen.getByText('טרם דווח')).toBeInTheDocument();
     expect(screen.getByText('מסובסד')).toBeInTheDocument();
+    expect(screen.getByText('⚠️ עיצום כספי')).toBeInTheDocument();
 
     // Expanded quick card omits official licensing text & MOE symbol (kept in full profile)
     expect(screen.queryByText(/סטטוס רישוי רשמי/)).not.toBeInTheDocument();

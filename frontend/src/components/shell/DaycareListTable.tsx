@@ -246,6 +246,17 @@ export const DaycareListTable: React.FC<DaycareListTableProps> = ({
                             מסובסד
                           </span>
                         )}
+                        {item.has_official_sanction && (
+                          <span
+                            className="sanction-inline-tag"
+                            title={
+                              item.official_sanction_text ||
+                              'קיים עיצום כספי רשמי במרשם משרד החינוך'
+                            }
+                          >
+                            ⚠️ עיצום כספי
+                          </span>
+                        )}
                       </div>
                       <div className="table-sub-address">{item.address}</div>
                     </td>

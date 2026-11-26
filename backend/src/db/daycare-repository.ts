@@ -1288,7 +1288,7 @@ export class InMemoryDaycareRepository implements DaycareRepository {
           source_type: s.source_type,
           source_label_he:
             s.source_type === 'community_sheet_tlv_seed'
-              ? 'מקור: גיליון הורים קהילתי · דורש אימות מחדש'
+              ? 'גיליון הורים קהילתי'
               : 'דיווח הורה מאומת',
           monthly_list_price_nis: s.monthly_list_price_nis,
           age_group: s.age_group,

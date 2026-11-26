@@ -68,11 +68,43 @@ const MINIMAL_DAYCARE: DaycareDetailDto = {
 };
 
 describe('DaycareProfileModal, ParentReportWizardModal & CorrectionRequestModal', () => {
-  it('renders DaycareProfileModal safely with historic NULL fields ("לא צוין בגיליון המקור") and closes on Esc/X', () => {
+  it('renders streamlined DaycareProfileModal with Maps/tel links, no IQR/N= jargon, collapsed reports accordion, single report CTA, and icon share', () => {
     const onClose = vi.fn();
+    const daycareWithBenchmarks: DaycareDetailDto = {
+      ...MINIMAL_DAYCARE,
+      official_capacity: 36,
+      has_official_sanction: true,
+      official_sanction_date: '2026-03-15',
+      official_sanction_text: 'הפעלה מעל הקיבולת המאושרת',
+      operator_corp_id: '514123456',
+      official_last_checked_at: '2026-11-20',
+      external_sources: [
+        {
+          source_system: 'moe_getmeonot',
+          external_record_id: '415009',
+          source_license: 'data.gov.il',
+          last_synced_at: '2026-11-20',
+        },
+      ],
+      relative_benchmarks: [
+        {
+          scope: 'radius_1km',
+          label_he: 'שכונה / רדיוס 1 ק"מ',
+          median_price_nis: 5600,
+          iqr_q25_nis: 5300,
+          iqr_q75_nis: 5900,
+          sample_daycares_count: 12,
+          is_sufficient_sample: true,
+          diff_nis: 200,
+          diff_pct: 3.6,
+          comparison_text_he: 'יקר ב-₪200 (+3.6%) מהחציון (₪5,600 · N=12 גנים)',
+        },
+      ],
+    };
+
     render(
       <DaycareProfileModal
-        daycare={MINIMAL_DAYCARE}
+        daycare={daycareWithBenchmarks}
         onClose={onClose}
         onOpenReportModal={vi.fn()}
         onOpenCorrectionModal={vi.fn()}
@@ -80,13 +112,125 @@ describe('DaycareProfileModal, ParentReportWizardModal & CorrectionRequestModal'
     );
 
     expect(screen.getByText('פעוטון רוטשילד')).toBeInTheDocument();
-    expect(screen.getAllByText('לא צוין בגיליון המקור').length).toBeGreaterThanOrEqual(3);
+    // Compact numeric age tag & clickable Google Maps + tel links
+    expect(screen.getByText('0–3')).toBeInTheDocument();
+    const mapsLink = screen.getByRole('link', {
+      name: /שדרות רוטשילד 88, תל אביב - יפו/,
+    });
+    expect(mapsLink).toHaveAttribute(
+      'href',
+      expect.stringContaining('https://www.google.com/maps/search/')
+    );
+    expect(screen.getByRole('link', { name: /03-5601122/ })).toHaveAttribute(
+      'href',
+      'tel:03-5601122'
+    );
+
+    // Bold official meta labels ("סמל משרד החינוך", "מפעיל", "קיבולת תקנית") and official sanction alert
+    expect(screen.getByText('סמל משרד החינוך:').tagName).toBe('STRONG');
+    expect(screen.getByText('מפעיל:').tagName).toBe('STRONG');
+    expect(screen.getByText('קיבולת תקנית:').tagName).toBe('STRONG');
+    expect(screen.getByRole('alert')).toHaveTextContent(
+      /עיצום כספי רשמי.*הפעלה מעל הקיבולת המאושרת/
+    );
+    const factsGrid = screen.getByLabelText('שעות פעילות ומאפייני בטיחות');
+    expect(factsGrid).toHaveTextContent('גילאים');
+    expect(factsGrid).toHaveTextContent('0–3');
+    expect(factsGrid).toHaveTextContent('שעות א׳–ה׳');
+    expect(factsGrid).toHaveTextContent('ימי שישי');
+    expect(factsGrid).toHaveTextContent('הזנה');
+    expect(factsGrid).toHaveTextContent('ממ״ד / מקלט');
+    expect(factsGrid).toHaveTextContent('מצלמות');
+    expect(factsGrid).not.toHaveTextContent('כולל הזנה');
+    expect(factsGrid).not.toHaveTextContent('ללא הזנה');
+    expect(factsGrid).not.toHaveTextContent(/\bיש\b|\bאין\b/);
+
+    // No technical IQR / N= jargon
+    expect(screen.queryByText(/IQR/)).not.toBeInTheDocument();
+    expect(screen.queryByText(/N=12/)).not.toBeInTheDocument();
+    expect(screen.getByText(/12 גנים/)).toBeInTheDocument();
+    expect(screen.getByText('יקר ב-₪200 (+3.6%)')).toBeInTheDocument();
+
+    // Regulatory context hidden behind toggle until clicked (includes corp id, last checked & sources)
+    expect(
+      screen.queryByText('מופיע במרשם משרד החינוך.')
+    ).not.toBeInTheDocument();
+    fireEvent.click(screen.getByRole('button', { name: /פרטי רישוי/ }));
+    expect(screen.getByText('מופיע במרשם משרד החינוך.')).toBeInTheDocument();
+    expect(screen.getByText(/514123456/)).toBeInTheDocument();
+    expect(screen.getByText(/2026-11-20/)).toBeInTheDocument();
+    expect(
+      screen.getByText(/מרשם מעונות היום \(משרד החינוך\)/)
+    ).toBeInTheDocument();
+
+    // Individual reports table is collapsed by default and opens on click with safety & size columns
+    expect(screen.queryByRole('table')).not.toBeInTheDocument();
+    fireEvent.click(
+      screen.getByRole('button', { name: /פירוט דיווחי הורים \(1\)/ })
+    );
+    const reportsTable = screen.getByRole('table');
+    expect(reportsTable).toBeInTheDocument();
+    expect(reportsTable).toHaveTextContent('ממ״ד');
+    expect(reportsTable).toHaveTextContent('מצלמות');
+    expect(reportsTable).toHaveTextContent('גודל');
+    expect(
+      screen.getAllByTitle('לא צוין בגיליון המקור').length
+    ).toBeGreaterThanOrEqual(3);
+
+    // Single "+ דווחו / עדכנו מחיר" CTA at bottom only (no duplicate in price banner) + icon share button
+    expect(
+      screen.getAllByRole('button', { name: /דווחו \/ עדכנו מחיר/ })
+    ).toHaveLength(1);
+    expect(screen.getByRole('button', { name: 'שיתוף' })).toBeInTheDocument();
 
     fireEvent.click(screen.getByLabelText('סגירת כרטיס הגן'));
     expect(onClose).toHaveBeenCalledTimes(1);
 
     fireEvent.keyDown(window, { key: 'Escape' });
     expect(onClose).toHaveBeenCalledTimes(2);
+  });
+
+  it('displays Friday hours instead of checkmark in reports table and never shows "טרם דווח מחיר" when an individual report exists', () => {
+    const futureYearOnlyDaycare: DaycareDetailDto = {
+      ...MINIMAL_DAYCARE,
+      display_mode: 'no_price',
+      headline_price_nis: null,
+      active_reports_count: 1,
+      individual_reports: [
+        {
+          ...MINIMAL_DAYCARE.individual_reports[0],
+          school_year: 2028,
+          school_year_label: 'תשפ״ח (2027–2028)',
+          monthly_price_nis: 4950,
+          start_time_weekday: '07:30',
+          end_time_weekday: '16:30',
+          includes_friday: true,
+          friday_start_time: '07:45',
+          friday_end_time: '12:15',
+          includes_nutrition: true,
+        },
+      ],
+    };
+
+    render(
+      <DaycareProfileModal
+        daycare={futureYearOnlyDaycare}
+        onClose={vi.fn()}
+        onOpenReportModal={vi.fn()}
+        onOpenCorrectionModal={vi.fn()}
+      />
+    );
+
+    expect(screen.queryByText('טרם דווח מחיר')).not.toBeInTheDocument();
+    expect(screen.getByText('₪4,950 / חודש (תשפ״ח)')).toBeInTheDocument();
+    const factsGrid = screen.getByLabelText('שעות פעילות ומאפייני בטיחות');
+    expect(factsGrid).toHaveTextContent('✓');
+    expect(factsGrid).not.toHaveTextContent('כולל הזנה');
+
+    fireEvent.click(
+      screen.getByRole('button', { name: /פירוט דיווחי הורים \(1\)/ })
+    );
+    expect(screen.getAllByText('07:45–12:15').length).toBeGreaterThanOrEqual(2);
   });
 
   it('opens Step 1 when initialDaycare is null without price badges and with updated texts', () => {

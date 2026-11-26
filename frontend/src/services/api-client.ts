@@ -26,6 +26,18 @@ export interface DaycareListItemDto {
   operator_name: string | null;
   phone_official: string | null;
   has_active_stop_order: boolean;
+  has_official_sanction?: boolean;
+  official_sanction_date?: string | null;
+  official_sanction_text?: string | null;
+  official_capacity?: number | null;
+  operator_corp_id?: string | null;
+  official_last_checked_at?: string | null;
+  external_sources?: {
+    source_system: string;
+    external_record_id: string;
+    source_license: string;
+    last_synced_at: string;
+  }[];
   display_mode: 'no_price' | 'single' | 'range' | 'median';
   price_Trust_tier:
     | 'no_price'
@@ -42,6 +54,8 @@ export interface DaycareListItemDto {
   active_reports_count: number;
   school_year: number;
   activity_hours_summary_he: string | null;
+  shelter_status?: 'yes' | 'no' | 'unknown';
+  cameras_0_3_status?: 'yes' | 'no' | 'unknown';
   yoy_trend_summary_he: string | null;
   benchmark_neighborhood_summary_he: string | null;
   regulatory_context_he: string;
@@ -118,6 +132,9 @@ export interface IndividualReportSummaryDto {
   friday_end_time: string | null;
   includes_nutrition: boolean | null;
   is_municipal_tzaharon_only: boolean;
+  reported_size_bucket?: string;
+  reported_shelter_status?: 'yes' | 'no' | 'unknown';
+  reported_cameras_0_3?: 'yes' | 'no' | 'unknown';
   report_source: string;
   report_source_label_he: string;
 }
@@ -1259,6 +1276,29 @@ function normalizeBackendListItem(raw: Record<string, unknown>): DaycareDetailDt
     operator_name: raw.operator_entity_name ? String(raw.operator_entity_name) : null,
     phone_official: raw.official_phone_public ? String(raw.official_phone_public) : null,
     has_active_stop_order: hasStopOrder,
+    has_official_sanction: Boolean(raw.has_official_sanction),
+    official_sanction_date: raw.official_sanction_date
+      ? String(raw.official_sanction_date)
+      : null,
+    official_sanction_text: raw.official_sanction_text
+      ? String(raw.official_sanction_text)
+      : null,
+    official_capacity:
+      typeof raw.official_capacity === 'number' ? raw.official_capacity : null,
+    operator_corp_id: raw.operator_corp_id
+      ? String(raw.operator_corp_id)
+      : null,
+    official_last_checked_at: raw.official_last_checked_at
+      ? String(raw.official_last_checked_at)
+      : null,
+    shelter_status:
+      (raw.shelter_status as 'yes' | 'no' | 'unknown' | undefined) || 'unknown',
+    cameras_0_3_status:
+      (raw.cameras_0_3_status as 'yes' | 'no' | 'unknown' | undefined) ||
+      'unknown',
+    external_sources: Array.isArray(raw.external_sources)
+      ? (raw.external_sources as DaycareListItemDto['external_sources'])
+      : [],
     display_mode: displayMode,
     price_Trust_tier: trustTier,
     price_formatted_he: priceFormattedHe,
@@ -1386,24 +1426,36 @@ function normalizeBackendDetailResponse(raw: Record<string, unknown>): DaycareDe
   const rawReports = Array.isArray(raw.individual_reports)
     ? (raw.individual_reports as Record<string, unknown>[])
     : [];
-  const individualReports: IndividualReportSummaryDto[] = rawReports.map((r) => ({
-    school_year: Number(r.school_year ?? 2027),
-    school_year_label: String(r.school_year_label || 'תשפ"ז (2026–2027)'),
-    age_group: String(r.age_group || '0_3_mixed'),
-    age_group_label_he: AGE_GROUP_LABELS[String(r.age_group)] || 'לידה עד 3',
-    monthly_price_nis: Number(r.monthly_list_price_nis ?? 0),
-    start_time_weekday: r.hours_sun_thu_start ? String(r.hours_sun_thu_start) : null,
-    end_time_weekday: r.hours_sun_thu_end ? String(r.hours_sun_thu_end) : null,
-    includes_friday:
-      typeof r.includes_friday === 'boolean' ? r.includes_friday : null,
-    friday_start_time: r.hours_fri_start ? String(r.hours_fri_start) : null,
-    friday_end_time: r.hours_fri_end ? String(r.hours_fri_end) : null,
-    includes_nutrition:
-      typeof r.includes_nutrition === 'boolean' ? r.includes_nutrition : null,
-    is_municipal_tzaharon_only: r.framework_track === 'municipal_tzaharon',
-    report_source: String(r.source_type || 'parent_verified_google'),
-    report_source_label_he: String(r.source_label_he || 'דיווח הורה מאומת'),
-  }));
+  const individualReports: IndividualReportSummaryDto[] = rawReports.map((r) => {
+    const yr = Number(r.school_year ?? 2027);
+    return {
+      school_year: yr,
+      school_year_label: formatHebrewSchoolYear(yr),
+      age_group: String(r.age_group || '0_3_mixed'),
+      age_group_label_he: AGE_GROUP_LABELS[String(r.age_group)] || 'לידה עד 3',
+      monthly_price_nis: Number(r.monthly_list_price_nis ?? 0),
+      start_time_weekday: r.hours_sun_thu_start ? String(r.hours_sun_thu_start) : null,
+      end_time_weekday: r.hours_sun_thu_end ? String(r.hours_sun_thu_end) : null,
+      includes_friday:
+        typeof r.includes_friday === 'boolean' ? r.includes_friday : null,
+      friday_start_time: r.hours_fri_start ? String(r.hours_fri_start) : null,
+      friday_end_time: r.hours_fri_end ? String(r.hours_fri_end) : null,
+      includes_nutrition:
+        typeof r.includes_nutrition === 'boolean' ? r.includes_nutrition : null,
+      is_municipal_tzaharon_only: r.framework_track === 'municipal_tzaharon',
+      reported_size_bucket: r.reported_size_bucket
+        ? String(r.reported_size_bucket)
+        : 'unknown',
+      reported_shelter_status:
+        (r.reported_shelter_status as 'yes' | 'no' | 'unknown' | undefined) ||
+        'unknown',
+      reported_cameras_0_3:
+        (r.reported_cameras_0_3 as 'yes' | 'no' | 'unknown' | undefined) ||
+        'unknown',
+      report_source: String(r.source_type || 'parent_verified_google'),
+      report_source_label_he: String(r.source_label_he || 'דיווח הורה מאומת'),
+    };
+  });
 
   // אם שדות המחיר בכותרת ריקים אך קיימת מטריצת מחירים — נעדכן מהקוהורט הראשי
   const primaryCohort = priceCohorts[0];
@@ -1415,16 +1467,103 @@ function normalizeBackendDetailResponse(raw: Record<string, unknown>): DaycareDe
 
   const metaObj = (raw.meta as Record<string, unknown> | undefined) || {};
 
+  const latestWithDetails = individualReports.find(
+    (r) =>
+      r.start_time_weekday ||
+      r.includes_friday !== null ||
+      r.includes_nutrition !== null
+  );
+  const derivedHoursSummary =
+    base.activity_hours_summary_he ||
+    (latestWithDetails
+      ? [
+          latestWithDetails.start_time_weekday &&
+          latestWithDetails.end_time_weekday
+            ? `א׳–ה׳ ${latestWithDetails.start_time_weekday}–${latestWithDetails.end_time_weekday}`
+            : null,
+          latestWithDetails.includes_friday === true
+            ? `שישי ${latestWithDetails.friday_start_time || '07:30'}–${latestWithDetails.friday_end_time || '12:30'}`
+            : latestWithDetails.includes_friday === false
+              ? 'ללא ימי שישי'
+              : null,
+          latestWithDetails.includes_nutrition === true
+            ? 'כולל הזנה'
+            : latestWithDetails.includes_nutrition === false
+              ? 'ללא הזנה'
+              : null,
+        ]
+          .filter(Boolean)
+          .join(' · ') || null
+      : null);
+
+  const reportedShelter = individualReports.find(
+    (r) =>
+      r.reported_shelter_status === 'yes' || r.reported_shelter_status === 'no'
+  )?.reported_shelter_status;
+  const reportedCameras = individualReports.find(
+    (r) => r.reported_cameras_0_3 === 'yes' || r.reported_cameras_0_3 === 'no'
+  )?.reported_cameras_0_3;
+
+  const rawShelter =
+    (daycareObj.shelter_status as 'yes' | 'no' | 'unknown' | undefined) ||
+    base.shelter_status ||
+    'unknown';
+  const shelterStatus =
+    rawShelter !== 'unknown' ? rawShelter : reportedShelter || 'unknown';
+
+  const rawCameras =
+    (daycareObj.cameras_0_3_status as 'yes' | 'no' | 'unknown' | undefined) ||
+    base.cameras_0_3_status ||
+    'unknown';
+  const camerasStatus =
+    rawCameras !== 'unknown' ? rawCameras : reportedCameras || 'unknown';
+
+  const latestReport = individualReports[0];
+  const resolvedDisplayMode =
+    base.display_mode !== 'no_price'
+      ? base.display_mode
+      : primaryCohort
+        ? primaryCohort.display_mode
+        : latestReport
+          ? 'single'
+          : 'no_price';
+  const resolvedHeadlinePrice =
+    base.headline_price_nis ??
+    primaryCohort?.headline_price_nis ??
+    latestReport?.monthly_price_nis ??
+    null;
+  const resolvedSchoolYear =
+    base.display_mode !== 'no_price'
+      ? base.school_year
+      : primaryCohort?.school_year ??
+        latestReport?.school_year ??
+        base.school_year;
+
   return {
     ...base,
     operator_name: daycareObj.operator_entity_name
       ? String(daycareObj.operator_entity_name)
       : base.operator_name,
-    headline_price_nis: base.headline_price_nis ?? primaryCohort?.headline_price_nis ?? null,
+    activity_hours_summary_he: derivedHoursSummary,
+    shelter_status: shelterStatus,
+    cameras_0_3_status: camerasStatus,
+    display_mode: resolvedDisplayMode,
+    school_year: resolvedSchoolYear,
+    headline_price_nis: resolvedHeadlinePrice,
+    min_price_nis:
+      base.min_price_nis ??
+      primaryCohort?.min_price_nis ??
+      resolvedHeadlinePrice,
+    max_price_nis:
+      base.max_price_nis ??
+      primaryCohort?.max_price_nis ??
+      resolvedHeadlinePrice,
     price_formatted_he:
       base.display_mode === 'no_price' && primaryCohort
         ? primaryCohort.price_formatted_he
-        : base.price_formatted_he,
+        : base.display_mode === 'no_price' && latestReport
+          ? `₪${latestReport.monthly_price_nis.toLocaleString()} לחודש (${latestReport.school_year_label})`
+          : base.price_formatted_he,
     active_reports_count:
       base.active_reports_count || individualReports.length || primaryCohort?.active_reports_count || 0,
     price_cohorts: priceCohorts,
