@@ -158,4 +158,31 @@ describe('DaycareMap — Dynamic Legend, Quick Jump & Google-Maps-Style Layer Sw
     expect(screen.queryByRole('dialog', { name: 'בחירת סוג מפה' })).not.toBeInTheDocument();
     expect(fab).toHaveTextContent('לוויין');
   });
+
+  it('hides default Leaflet attribution bar and shows active map credit inside compact info button', () => {
+    render(
+      <DaycareMap
+        items={[]}
+        selectedId={null}
+        hoveredId={null}
+        colorMode="relative_price"
+        cityMedianPriceNis={5400}
+        flyToTarget={null}
+        onSelectDaycare={vi.fn()}
+        onOpenFullProfile={vi.fn()}
+        onReportPriceForDaycare={vi.fn()}
+      />
+    );
+
+    const infoBtn = screen.getByRole('button', { name: 'מידע וקרדיט מפה' });
+    expect(screen.queryByText(/OpenStreetMap/)).not.toBeInTheDocument();
+
+    fireEvent.click(infoBtn);
+    expect(screen.getByText(/OpenStreetMap/)).toBeInTheDocument();
+
+    // Switch to Satellite while credit popover is open -> credit updates dynamically to Esri
+    fireEvent.click(screen.getByRole('button', { name: /החלפת סוג מפה/ }));
+    fireEvent.click(screen.getByText('לוויין'));
+    expect(screen.getByText(/Esri/)).toBeInTheDocument();
+  });
 });

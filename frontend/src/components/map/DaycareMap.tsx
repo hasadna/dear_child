@@ -16,37 +16,35 @@ interface BaseMapStyleMeta {
   id: BaseMapStyleId;
   labelHe: string;
   thumbClass: string;
+  attributionText: string;
+  attributionUrl: string;
   createLayer: () => L.Layer;
 }
-
-const COMMON_DATA_ATTRIBUTION = ' | נתונים: הסדנא לידע ציבורי (ODbL 1.0)';
 
 const BASE_MAP_STYLES: BaseMapStyleMeta[] = [
   {
     id: 'osm_standard',
     labelHe: 'מפת רחובות',
     thumbClass: 'thumb-streets',
+    attributionText: '© OpenStreetMap contributors',
+    attributionUrl: 'https://www.openstreetmap.org/copyright',
     createLayer: () =>
       L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
         maxZoom: 19,
-        attribution:
-          '&copy; <a href="https://www.openstreetmap.org/copyright" target="_blank" rel="noreferrer">OpenStreetMap</a> contributors' +
-          COMMON_DATA_ATTRIBUTION,
       }),
   },
   {
     id: 'esri_satellite',
     labelHe: 'לוויין',
     thumbClass: 'thumb-satellite',
+    attributionText: '© Esri, Maxar, Earthstar Geographics',
+    attributionUrl: 'https://www.esri.com/',
     createLayer: () =>
       L.layerGroup([
         L.tileLayer(
           'https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}',
           {
             maxZoom: 19,
-            attribution:
-              'Tiles &copy; Esri &mdash; Source: Esri, Maxar, Earthstar Geographics' +
-              COMMON_DATA_ATTRIBUTION,
           }
         ),
         L.tileLayer(
@@ -62,14 +60,13 @@ const BASE_MAP_STYLES: BaseMapStyleMeta[] = [
     id: 'esri_street',
     labelHe: 'מפה נקייה',
     thumbClass: 'thumb-clean',
+    attributionText: '© Esri, TomTom, FAO, NOAA, USGS',
+    attributionUrl: 'https://www.esri.com/',
     createLayer: () =>
       L.tileLayer(
         'https://server.arcgisonline.com/ArcGIS/rest/services/World_Street_Map/MapServer/tile/{z}/{y}/{x}',
         {
           maxZoom: 19,
-          attribution:
-            'Tiles &copy; Esri &mdash; Esri, TomTom, FAO, NOAA, USGS' +
-            COMMON_DATA_ATTRIBUTION,
         }
       ),
   },
@@ -77,15 +74,14 @@ const BASE_MAP_STYLES: BaseMapStyleMeta[] = [
     id: 'esri_gray',
     labelHe: 'מפה בהירה',
     thumbClass: 'thumb-light',
+    attributionText: '© Esri, DeLorme, NAVTEQ',
+    attributionUrl: 'https://www.esri.com/',
     createLayer: () =>
       L.layerGroup([
         L.tileLayer(
           'https://server.arcgisonline.com/ArcGIS/rest/services/Canvas/World_Light_Gray_Base/MapServer/tile/{z}/{y}/{x}',
           {
             maxZoom: 16,
-            attribution:
-              'Tiles &copy; Esri &mdash; Esri, DeLorme, NAVTEQ' +
-              COMMON_DATA_ATTRIBUTION,
           }
         ),
         L.tileLayer(
@@ -101,12 +97,11 @@ const BASE_MAP_STYLES: BaseMapStyleMeta[] = [
     id: 'open_topo',
     labelHe: 'פני שטח',
     thumbClass: 'thumb-topo',
+    attributionText: '© OpenStreetMap contributors, © OpenTopoMap (CC-BY-SA)',
+    attributionUrl: 'https://opentopomap.org',
     createLayer: () =>
       L.tileLayer('https://{s}.tile.opentopomap.org/{z}/{x}/{y}.png', {
         maxZoom: 17,
-        attribution:
-          'Map data: &copy; OpenStreetMap contributors, SRTM | Map style: &copy; <a href="https://opentopomap.org" target="_blank" rel="noreferrer">OpenTopoMap</a> (CC-BY-SA)' +
-          COMMON_DATA_ATTRIBUTION,
       }),
   },
 ];
@@ -163,30 +158,42 @@ export const DaycareMap: React.FC<DaycareMapProps> = ({
   const baseLayerRef = useRef<L.Layer | null>(null);
   const markersLayerRef = useRef<L.LayerGroup | null>(null);
   const layerMenuRef = useRef<HTMLDivElement | null>(null);
+  const attributionRef = useRef<HTMLDivElement | null>(null);
 
   const [currentZoom, setCurrentZoom] = useState<number>(13);
   const [baseStyleId, setBaseStyleId] =
     useState<BaseMapStyleId>('osm_standard');
   const [layersOpen, setLayersOpen] = useState<boolean>(false);
+  const [attributionOpen, setAttributionOpen] = useState<boolean>(false);
 
   useModalDismiss(layersOpen, () => setLayersOpen(false));
+  useModalDismiss(attributionOpen, () => setAttributionOpen(false));
 
-  // סגירת חלון בחירת סוג המפה בלחיצה מחוץ לו
+  // סגירת חלון בחירת סוג המפה או קרדיט בלחיצה מחוץ להם
   useEffect(() => {
-    if (!layersOpen) return;
+    if (!layersOpen && !attributionOpen) return;
     const handleOutsideClick = (event: MouseEvent) => {
+      const target = event.target as Node;
       if (
+        layersOpen &&
         layerMenuRef.current &&
-        !layerMenuRef.current.contains(event.target as Node)
+        !layerMenuRef.current.contains(target)
       ) {
         setLayersOpen(false);
+      }
+      if (
+        attributionOpen &&
+        attributionRef.current &&
+        !attributionRef.current.contains(target)
+      ) {
+        setAttributionOpen(false);
       }
     };
     document.addEventListener('mousedown', handleOutsideClick);
     return () => document.removeEventListener('mousedown', handleOutsideClick);
-  }, [layersOpen]);
+  }, [layersOpen, attributionOpen]);
 
-  // אתחול מפת Leaflet
+  // אתחול מפת Leaflet (ללא שורת הקרדיט הדיפולטיבית — מוחלפת בכפתור ⓘ זעיר)
   useEffect(() => {
     if (!mapContainerRef.current || mapInstanceRef.current) return;
 
@@ -194,6 +201,7 @@ export const DaycareMap: React.FC<DaycareMapProps> = ({
       center: [32.078, 34.778],
       zoom: 13,
       zoomControl: false,
+      attributionControl: false,
     });
 
     L.control.zoom({ position: 'topleft' }).addTo(map);
@@ -547,6 +555,32 @@ export const DaycareMap: React.FC<DaycareMapProps> = ({
             <span className="layers-fab-text">{activeBaseMeta.labelHe}</span>
           </span>
         </button>
+      </div>
+
+      {/* כפתור קרדיט מפה זעיר בפינה (מחליף את שורת הקרדיט הדיפולטיבית תוך שמירה על דרישות רישיון OSM/Esri) */}
+      <div className="map-attribution-corner" ref={attributionRef}>
+        <button
+          type="button"
+          className="map-attribution-btn"
+          aria-label="מידע וקרדיט מפה"
+          aria-expanded={attributionOpen}
+          title="קרדיט מפה"
+          onClick={() => setAttributionOpen((v) => !v)}
+        >
+          i
+        </button>
+        {attributionOpen && (
+          <div className="map-attribution-popover" role="tooltip">
+            <a
+              href={activeBaseMeta.attributionUrl}
+              target="_blank"
+              rel="noopener noreferrer"
+            >
+              {activeBaseMeta.attributionText}
+            </a>
+            <span> · נתונים: הסדנא לידע ציבורי (ODbL 1.0)</span>
+          </div>
+        )}
       </div>
 
       {/* מקרא קרטוגרפי דינמי לפי מצב הצביעה הנבחר (ללא הצגת מחירים) */}
