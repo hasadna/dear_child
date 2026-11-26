@@ -18,6 +18,7 @@ import {
   fetchDaycaresList,
   filterDaycaresClientSide,
 } from './services/api-client';
+import { downloadDaycaresExcel } from './utils/excel-export';
 
 const DearChildWorkspace: React.FC = () => {
   const [allDaycares, setAllDaycares] = useState<DaycareDetailDto[]>([]);
@@ -143,52 +144,9 @@ const DearChildWorkspace: React.FC = () => {
     }
   };
 
-  // ייצוא תוצאות החיפוש לקובץ CSV תקני בעברית עם UTF-8 BOM (תואם אקסל)
-  const handleExportCsv = () => {
-    const headers = [
-      'שם המסגרת',
-      'יישוב',
-      'כתובת',
-      'שכבת גיל',
-      'סטטוס רישוי רשמי',
-      'סמל משרד החינוך',
-      'סמל משרד העבודה',
-      'סבסוד',
-      'מחיר חודשי מוצג',
-      'דרגת אמינות ודיווחים',
-      'שעות פעילות מדווחות',
-    ];
-    const rows = filteredItems.map((it) => [
-      it.name,
-      it.city_name_he,
-      it.address,
-      it.age_group_label_he,
-      it.license_status_label_he,
-      it.ministry_edu_symbol || '',
-      it.labor_Cross_symbol || '',
-      it.is_subsidized ? 'כן' : 'לא',
-      it.price_formatted_he,
-      it.trust_badge_he,
-      it.activity_hours_summary_he || '',
-    ]);
-
-    const escapeCsv = (val: string) => `"${String(val).replace(/"/g, '""')}"`;
-    const csvContent =
-      '\uFEFF' +
-      [
-        headers.map(escapeCsv).join(','),
-        ...rows.map((r) => r.map(escapeCsv).join(',')),
-      ].join('\r\n');
-
-    const blob = new Blob([csvContent], { type: 'text/csv;charset=utf-8;' });
-    const url = URL.createObjectURL(blob);
-    const link = document.createElement('a');
-    link.href = url;
-    link.download = 'dear_child_daycares_export.csv';
-    document.body.appendChild(link);
-    link.click();
-    document.body.removeChild(link);
-    URL.revokeObjectURL(url);
+  // ייצוא תוצאות החיפוש לקובץ Excel מעוצב (.xlsx) בעברית (RTL)
+  const handleExportExcel = () => {
+    void downloadDaycaresExcel(filteredItems);
   };
 
   return (
@@ -234,7 +192,7 @@ const DearChildWorkspace: React.FC = () => {
               })
             }
             onFlagErrorForDaycare={(daycare) => setCorrectionDaycare(daycare)}
-            onExportCsv={handleExportCsv}
+            onExportExcel={handleExportExcel}
           />
 
           {/* חצי שמאלי ב-RTL: המפה האינטראקטיבית (Leaflet + Supercluster + Price Pills) */}
