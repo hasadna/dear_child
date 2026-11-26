@@ -1,9 +1,11 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import {
+  DaycareDetailDto,
   fetchAutocompleteLocations,
   fetchDaycareDetails,
   fetchDaycaresList,
   filterDaycaresClientSide,
+  setInMemoryDaycaresForTesting,
   submitCorrectionRequest,
   submitParentReport,
   withdrawParentReport,
@@ -175,10 +177,111 @@ describe('API Client & Backend-to-Frontend DTO Adapter', () => {
     );
   });
 
+  it('returns empty list when Backend returns empty items (clean DB, no hardcoded fallback)', async () => {
+    setInMemoryDaycaresForTesting([]);
+    vi.spyOn(globalThis, 'fetch').mockResolvedValueOnce(
+      new Response(JSON.stringify({ items: [] }), { status: 200 })
+    );
+
+    const items = await fetchDaycaresList();
+    expect(items).toEqual([]);
+  });
+
   it('filters daycares accurately by searchTerm, ageGroups, licensing, subsidy and features', async () => {
+    const testItems: DaycareDetailDto[] = [
+      {
+        id: 'test-1',
+        name: 'גן בדיקה 1',
+        city_code: 5000,
+        city_name_he: 'תל אביב - יפו',
+        address: 'רחוב הבדיקה 1, תל אביב - יפו',
+        lat: 32.08,
+        lon: 34.78,
+        target_age_groups: ['1_2'],
+        age_group_label_he: '1–2',
+        is_subsidized: false,
+        license_status: 'licensed',
+        license_status_label_he: 'רישיון הפעלה בתוקף',
+        license_icon_code: 'valid',
+        ministry_edu_symbol: '111111',
+        labor_Cross_symbol: null,
+        operator_name: 'בדיקה',
+        phone_official: null,
+        has_active_stop_order: false,
+        display_mode: 'single',
+        price_Trust_tier: 'single_parent_report',
+        price_formatted_he: '₪5,000',
+        price_pill_short_he: '₪5,000',
+        trust_badge_he: 'דיווח בודד',
+        headline_price_nis: 5000,
+        min_price_nis: 5000,
+        max_price_nis: 5000,
+        active_reports_count: 1,
+        school_year: 2027,
+        activity_hours_summary_he: 'א׳–ה׳ 07:30–16:30',
+        yoy_trend_summary_he: null,
+        benchmark_neighborhood_summary_he: null,
+        regulatory_context_he: 'רשמי.',
+        price_cohorts: [],
+        relative_benchmarks: [],
+        regulated_benchmark_comparison: {
+          regulated_symbol_max_price_nis: 2515,
+          annual_gap_11_months_nis: null,
+          summary_he: '',
+        },
+        yoy_price_history: [],
+        individual_reports: [],
+        reliance_disclaimer_he: 'כתב ויתור.',
+      },
+      {
+        id: 'test-2',
+        name: 'גן עירייה 3–6',
+        city_code: 5000,
+        city_name_he: 'תל אביב - יפו',
+        address: 'רחוב הבדיקה 2, תל אביב - יפו',
+        lat: 32.09,
+        lon: 34.79,
+        target_age_groups: ['3_6'],
+        age_group_label_he: '3–6',
+        is_subsidized: true,
+        license_status: 'municipal_verified',
+        license_status_label_he: 'גן רשמי',
+        license_icon_code: 'valid',
+        ministry_edu_symbol: '222222',
+        labor_Cross_symbol: null,
+        operator_name: 'עירייה',
+        phone_official: null,
+        has_active_stop_order: false,
+        display_mode: 'no_price',
+        price_Trust_tier: 'no_price',
+        price_formatted_he: 'טרם דווח',
+        price_pill_short_he: '+ הוסף מחיר',
+        trust_badge_he: 'ממתין לדיווח',
+        headline_price_nis: null,
+        min_price_nis: null,
+        max_price_nis: null,
+        active_reports_count: 0,
+        school_year: 2027,
+        activity_hours_summary_he: null,
+        yoy_trend_summary_he: null,
+        benchmark_neighborhood_summary_he: null,
+        regulatory_context_he: 'רשמי.',
+        price_cohorts: [],
+        relative_benchmarks: [],
+        regulated_benchmark_comparison: {
+          regulated_symbol_max_price_nis: 980,
+          annual_gap_11_months_nis: null,
+          summary_he: '',
+        },
+        yoy_price_history: [],
+        individual_reports: [],
+        reliance_disclaimer_he: 'כתב ויתור.',
+      },
+    ];
+    setInMemoryDaycaresForTesting(testItems);
     vi.spyOn(globalThis, 'fetch').mockRejectedValue(new Error('offline'));
     const items = await fetchDaycaresList();
-    expect(items.length).toBeGreaterThan(0);
+    expect(items).toHaveLength(2);
 
     const byAge36 = filterDaycaresClientSide(items, {
       searchTerm: '',
@@ -207,6 +310,7 @@ describe('API Client & Backend-to-Frontend DTO Adapter', () => {
 
     const items = await fetchDaycaresList();
     const target = items[0];
+    expect(target).toBeDefined();
 
     const reportRes = await submitParentReport({
       daycare_id: target.id,
