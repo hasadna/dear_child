@@ -1,7 +1,10 @@
 import { describe, expect, it } from 'vitest';
 import { executeCorrectionsCliCommand } from '../cli/manage-corrections.js';
 import { loadConfig } from '../config/env.js';
-import { InMemoryDaycareRepository } from '../db/daycare-repository.js';
+import {
+  InMemoryDaycareRepository,
+  PostgresDaycareRepository,
+} from '../db/daycare-repository.js';
 import { AuthVerifiers } from '../security/external-verifiers.js';
 import { AUTH_COOKIE_NAME } from '../security/nullifiers.js';
 import { buildServer } from '../server.js';
@@ -28,7 +31,7 @@ describe('Dear Child REST API, Blind Upsert/Withdraw, CLI Moderation & MCP Serve
       SECRET_PEPPER: 'test-secret-pepper-256-bit-key-1234567890',
       QUOTA_PEPPER_SEPARATE: 'test-quota-pepper-separate-key-0987654321',
     });
-    const repository = new InMemoryDaycareRepository();
+    const repository = new InMemoryDaycareRepository({ seedDemoData: true });
     return buildServer({ config, repository, verifiers: mockVerifiers });
   }
 
@@ -496,5 +499,95 @@ describe('Dear Child REST API, Blind Upsert/Withdraw, CLI Moderation & MCP Serve
     expect(comp.annual_12m_gap_nis).toBe((5600 - 2515) * 12);
 
     await app.close();
+  });
+
+  it('PostgresDaycareRepository binds exact SQL parameter counts across search, map_pins, stats, and autocomplete', async () => {
+    const queries: Array<{ text: string; values: unknown[] }> = [];
+    const fakePool = {
+      async query(text: string, values: unknown[] = []) {
+        queries.push({ text, values });
+        const placeholders = Array.from(text.matchAll(/\$(\d+)/g)).map((m) =>
+          Number(m[1])
+        );
+        const maxPlaceholder =
+          placeholders.length > 0 ? Math.max(...placeholders) : 0;
+        expect(values.length).toBe(maxPlaceholder);
+        if (text.includes('COUNT(*)')) {
+          return { rows: [{ total: '0', total_cnt: '0', subsidized_cnt: '0', median_price: null }] };
+        }
+        return { rows: [] };
+      },
+    };
+
+    const pgRepo = new PostgresDaycareRepository(
+      fakePool as never,
+      fakePool as never
+    );
+
+    const emptyRes = await pgRepo.searchDaycares({ school_year: 2027 });
+    expect(emptyRes.items).toEqual([]);
+    expect(emptyRes.totalCount).toBe(0);
+    expect(emptyRes.mapPins).toBeUndefined();
+    expect(queries[0].values).toEqual([2027]);
+    expect(queries[1].values).toEqual([2027, 50, 0]);
+
+    const filteredRes = await pgRepo.searchDaycares({
+      city_code: 5000,
+      city_name_he: 'תל אביב',
+      framework_track: 'private_full_day',
+      q: 'כוכב',
+      age_group: '1_2',
+      is_subsidized_symbol: false,
+      license_status: 'active_license',
+      shelter_status: 'yes',
+      lat: 32.0853,
+      lng: 34.7818,
+      radius_m: 1500,
+      bbox: '34.7,32.0,34.85,32.15',
+      has_price_only: true,
+      min_price: 3000,
+      max_price: 7000,
+      sort_by: 'price_asc',
+      format: 'map_pins',
+      school_year: 2028,
+    });
+    expect(filteredRes.items).toEqual([]);
+    expect(filteredRes.mapPins).toEqual([]);
+    expect(queries[2].values).toEqual([
+      2028,
+      5000,
+      '%תל אביב%',
+      'private_full_day',
+      'active_license',
+      false,
+      'yes',
+      '1_2',
+      34.7818,
+      32.0853,
+      1500,
+      34.7,
+      32.0,
+      34.85,
+      32.15,
+      '%כוכב%',
+      3000,
+      7000,
+    ]);
+    expect(queries[3].values).toEqual([...queries[2].values, 5000]);
+
+    const stats = await pgRepo.getAreaPriceStats({
+      city_name_he: 'תל אביב - יפו',
+      school_year: 2027,
+      age_group: '1_2',
+    });
+    expect(stats.city_code).toBe(5000);
+    expect(stats.total_official_daycares).toBe(0);
+
+    const ac = await pgRepo.autocompleteLocations({
+      q: 'תל אביב',
+      city_code: 5000,
+      limit: 5,
+    });
+    expect(ac.some((item) => item.kind === 'city')).toBe(true);
   });
 });

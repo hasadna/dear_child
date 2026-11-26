@@ -28,6 +28,7 @@ import {
   normalizeCityName,
   normalizeStreetName,
 } from './seed-dictionaries.js';
+import { getActiveSchoolYear } from '../utils/school-years.js';
 
 export type TriStateStatus = 'yes' | 'no' | 'unknown';
 export type SizeBucket =
@@ -448,8 +449,10 @@ export class InMemoryDaycareRepository implements DaycareRepository {
   private readonly quotaMap = new Map<string, number>();
   private readonly corrections: CorrectionRequestRecord[] = [];
 
-  constructor() {
-    this.seedInitialOfficialData();
+  constructor(options: { seedDemoData?: boolean } = {}) {
+    if (options.seedDemoData) {
+      this.seedInitialOfficialData();
+    }
   }
 
   private seedInitialOfficialData() {
@@ -1701,19 +1704,663 @@ export class InMemoryDaycareRepository implements DaycareRepository {
  * מימוש Repository מול PostgreSQL 17 + PostGIS (משתמש ב-roPool לקריאה וב-writePool לכתיבה עיוורת)
  */
 export class PostgresDaycareRepository implements DaycareRepository {
-  private readonly fallbackMemory = new InMemoryDaycareRepository();
-
   constructor(
     private readonly roPool: pg.Pool,
     private readonly writePool: pg.Pool
   ) {}
 
-  async searchDaycares(query: DaycareSearchQuery) {
-    return this.fallbackMemory.searchDaycares(query);
+  async searchDaycares(query: DaycareSearchQuery): Promise<{
+    items: DaycareListItemDto[];
+    mapPins?: CompactMapPinDto[];
+    totalCount: number;
+    cityMedianPriceNis: number | null;
+  }> {
+    const activeSchoolYear = query.school_year || getActiveSchoolYear();
+    const page = Math.max(1, query.page || 1);
+    const pageSize = Math.min(200, Math.max(1, query.page_size || 50));
+    const offset = (page - 1) * pageSize;
+
+    // $1 is always activeSchoolYear for the daycare_year_summary LEFT JOIN
+    const conditions: string[] = [
+      'd.is_official_source = TRUE',
+      'd.is_active_in_registry = TRUE',
+    ];
+    const baseValues: unknown[] = [activeSchoolYear];
+
+    if (query.city_code !== undefined) {
+      baseValues.push(query.city_code);
+      conditions.push(`d.city_code = $${baseValues.length}`);
+    }
+    if (query.city_name_he && query.city_name_he.trim()) {
+      baseValues.push(`%${query.city_name_he.trim()}%`);
+      conditions.push(`d.city_name_he ILIKE $${baseValues.length}`);
+    }
+    if (query.framework_track) {
+      baseValues.push(query.framework_track);
+      conditions.push(
+        `d.primary_track = $${baseValues.length}::public.framework_track_enum`
+      );
+    }
+    if (query.license_status) {
+      baseValues.push(query.license_status);
+      conditions.push(
+        `d.license_status = $${baseValues.length}::public.license_status_enum`
+      );
+    }
+    if (query.is_subsidized_symbol !== undefined) {
+      baseValues.push(query.is_subsidized_symbol);
+      conditions.push(`d.is_subsidized_symbol = $${baseValues.length}`);
+    }
+    if (query.shelter_status) {
+      baseValues.push(query.shelter_status);
+      conditions.push(
+        `d.shelter_status = $${baseValues.length}::public.tri_state_status_enum`
+      );
+    }
+    if (query.age_group) {
+      baseValues.push(query.age_group);
+      conditions.push(
+        `$${baseValues.length}::public.age_group_enum = ANY(d.age_groups_supported)`
+      );
+    }
+    if (
+      query.lat !== undefined &&
+      query.lng !== undefined &&
+      query.radius_m !== undefined
+    ) {
+      baseValues.push(query.lng, query.lat, query.radius_m);
+      const lngIdx = `$${baseValues.length - 2}`;
+      const latIdx = `$${baseValues.length - 1}`;
+      const radIdx = `$${baseValues.length}`;
+      conditions.push(
+        `ST_DWithin(d.geom::geography, ST_SetSRID(ST_MakePoint(${lngIdx}, ${latIdx}), 4326)::geography, ${radIdx})`
+      );
+    }
+    if (query.bbox) {
+      const parts = query.bbox.split(',').map(Number);
+      if (parts.length === 4 && parts.every(Number.isFinite)) {
+        const [minLng, minLat, maxLng, maxLat] = parts;
+        baseValues.push(minLng, minLat, maxLng, maxLat);
+        const i1 = `$${baseValues.length - 3}`;
+        const i2 = `$${baseValues.length - 2}`;
+        const i3 = `$${baseValues.length - 1}`;
+        const i4 = `$${baseValues.length}`;
+        conditions.push(
+          `ST_Intersects(d.geom, ST_MakeEnvelope(${i1}, ${i2}, ${i3}, ${i4}, 4326))`
+        );
+      }
+    }
+    if (query.q && query.q.trim()) {
+      baseValues.push(`%${query.q.trim()}%`);
+      const p = `$${baseValues.length}`;
+      conditions.push(
+        `(d.display_name ILIKE ${p} OR d.full_address_public ILIKE ${p} OR d.city_name_he ILIKE ${p} OR COALESCE(d.moe_symbol, '') ILIKE ${p} OR COALESCE(d.mol_symbol, '') ILIKE ${p})`
+      );
+    }
+    if (query.has_price_only) {
+      conditions.push('ys.primary_pin_price_nis IS NOT NULL');
+    }
+    if (query.min_price !== undefined) {
+      baseValues.push(query.min_price);
+      conditions.push(`ys.primary_pin_price_nis >= $${baseValues.length}`);
+    }
+    if (query.max_price !== undefined) {
+      baseValues.push(query.max_price);
+      conditions.push(`ys.primary_pin_price_nis <= $${baseValues.length}`);
+    }
+
+    const whereClause = conditions.join(' AND ');
+    const countRes = await this.roPool.query<{
+      total: string;
+      median_price: string | null;
+    }>(
+      `
+      SELECT
+        COUNT(*)::TEXT AS total,
+        ROUND(PERCENTILE_CONT(0.5) WITHIN GROUP (ORDER BY ys.primary_pin_price_nis))::TEXT AS median_price
+      FROM public.daycares d
+      LEFT JOIN public.daycare_year_summary ys
+        ON ys.daycare_id = d.daycare_id AND ys.school_year = $1
+      WHERE ${whereClause}
+      `,
+      baseValues
+    );
+    const totalCount = Number(countRes.rows[0]?.total || 0);
+    const cityMedianPriceNis =
+      countRes.rows[0]?.median_price !== null &&
+      countRes.rows[0]?.median_price !== undefined
+        ? Number(countRes.rows[0].median_price)
+        : null;
+
+    let orderByClause = 'd.display_name ASC';
+    if (query.sort_by === 'price_asc') {
+      orderByClause = 'ys.primary_pin_price_nis ASC NULLS LAST, d.display_name ASC';
+    } else if (query.sort_by === 'price_desc') {
+      orderByClause = 'ys.primary_pin_price_nis DESC NULLS LAST, d.display_name ASC';
+    } else if (query.sort_by === 'reports_desc') {
+      orderByClause = 'COALESCE(ys.total_reports_count, 0) DESC, d.display_name ASC';
+    }
+
+    const isMapPins = query.format === 'map_pins';
+    const rowsValues = isMapPins
+      ? [...baseValues, 5000]
+      : [...baseValues, pageSize, offset];
+    const paginationClause = isMapPins
+      ? `LIMIT $${rowsValues.length}`
+      : `LIMIT $${rowsValues.length - 1} OFFSET $${rowsValues.length}`;
+
+    const rowsRes = await this.roPool.query<{
+      daycare_id: string;
+      external_facility_id: string | null;
+      moe_symbol: string | null;
+      mol_symbol: string | null;
+      display_name: string;
+      city_code: number;
+      city_name_he: string;
+      neighborhood_he: string | null;
+      full_address_public: string;
+      is_location_approximated: boolean;
+      lat: number;
+      lng: number;
+      age_groups_supported: DaycareAgeGroup[];
+      primary_track: FrameworkTrack;
+      licensing_regime: LicensingRegime;
+      license_status: DaycareLicenseStatus;
+      is_subsidized_symbol: boolean;
+      has_active_stop_order: boolean;
+      has_official_sanction: boolean;
+      official_sanction_date: string | null;
+      official_sanction_text: string | null;
+      official_phone_public: string | null;
+      shelter_status: TriStateStatus;
+      official_last_checked_at: string;
+      primary_pin_price_nis: number | null;
+      pin_requires_tilde: boolean | null;
+      min_price_nis: number | null;
+      max_price_nis: number | null;
+      total_reports_count: number | null;
+      price_display_mode:
+        | 'single'
+        | 'range_discrepancy'
+        | 'average_close'
+        | 'median_consensus'
+        | null;
+      price_trust_tier:
+        | 'tier_2_parent_consensus'
+        | 'tier_3_unverified_report'
+        | null;
+    }>(
+      `
+      SELECT
+        d.daycare_id, d.external_facility_id, d.moe_symbol, d.mol_symbol,
+        d.display_name, d.city_code, d.city_name_he, d.neighborhood_he,
+        d.full_address_public, d.is_location_approximated,
+        ST_Y(d.geom) AS lat, ST_X(d.geom) AS lng,
+        d.age_groups_supported, d.primary_track, d.licensing_regime,
+        d.license_status, d.is_subsidized_symbol, d.has_active_stop_order,
+        d.has_official_sanction, d.official_sanction_date::TEXT,
+        d.official_sanction_text, d.official_phone_public, d.shelter_status,
+        d.official_last_checked_at::TEXT,
+        ys.primary_pin_price_nis, ys.pin_requires_tilde,
+        ys.min_price_nis, ys.max_price_nis,
+        ys.total_reports_count, ys.price_display_mode,
+        ys.price_trust_tier
+      FROM public.daycares d
+      LEFT JOIN public.daycare_year_summary ys
+        ON ys.daycare_id = d.daycare_id AND ys.school_year = $1
+      WHERE ${whereClause}
+      ORDER BY ${orderByClause}
+      ${paginationClause}
+      `,
+      rowsValues
+    );
+
+    const enriched = rowsRes.rows.map((r) => {
+      const repPrice = r.primary_pin_price_nis;
+      const mode = r.price_display_mode;
+      const priceSummary =
+        repPrice !== null && mode
+          ? buildFormattedPriceSummary({
+              schoolYear: activeSchoolYear,
+              priceDisplayMode: mode,
+              primaryPinPriceNis: repPrice,
+              pinRequiresTilde:
+                r.pin_requires_tilde ?? mode === 'range_discrepancy',
+              minPriceNis: r.min_price_nis ?? repPrice,
+              maxPriceNis: r.max_price_nis ?? repPrice,
+              medianPriceNis: repPrice,
+              reportsCount: Number(r.total_reports_count || 0),
+              priceTrustTier:
+                r.price_trust_tier || 'tier_3_unverified_report',
+              isSubsidizedSymbol: r.is_subsidized_symbol,
+              frameworkTrack: r.primary_track,
+              cityMedianPriceNis,
+            })
+          : null;
+      return { row: r, priceSummary };
+    });
+
+    const items: DaycareListItemDto[] = enriched.map(({ row: r, priceSummary }) => ({
+      daycare_id: r.daycare_id,
+      external_facility_id: r.external_facility_id,
+      moe_symbol: r.moe_symbol,
+      mol_symbol: r.mol_symbol,
+      display_name: r.display_name,
+      city_code: r.city_code,
+      city_name_he: r.city_name_he,
+      neighborhood_he: r.neighborhood_he,
+      full_address_public: r.full_address_public,
+      is_location_approximated: r.is_location_approximated,
+      location: { lat: Number(r.lat), lng: Number(r.lng) },
+      age_groups_supported: r.age_groups_supported,
+      primary_track: r.primary_track,
+      licensing_regime: r.licensing_regime,
+      license_status: r.license_status,
+      is_subsidized_symbol: r.is_subsidized_symbol,
+      has_active_stop_order: r.has_active_stop_order,
+      has_official_sanction: r.has_official_sanction,
+      official_phone_public: stripMobilePhoneForBulkExport(
+        r.official_phone_public
+      ),
+      shelter_status: r.shelter_status,
+      official_last_checked_at: r.official_last_checked_at,
+      regulatory_context_he: buildRegulatoryContextHe({
+        licenseStatus: r.license_status,
+        licensingRegime: r.licensing_regime,
+        isSubsidizedSymbol: r.is_subsidized_symbol,
+        moeSymbol: r.moe_symbol,
+        molSymbol: r.mol_symbol,
+        hasActiveStopOrder: r.has_active_stop_order,
+        hasOfficialSanction: r.has_official_sanction,
+        officialSanctionDate: r.official_sanction_date,
+        officialSanctionText: r.official_sanction_text,
+        officialLastCheckedAt: r.official_last_checked_at,
+      }),
+      price_summary_current_year: priceSummary,
+    }));
+
+    const mapPins: CompactMapPinDto[] | undefined = isMapPins
+      ? enriched.map(({ row: r, priceSummary }) => ({
+          id: r.daycare_id,
+          name: r.display_name,
+          city_code: r.city_code,
+          lat: Number(r.lat),
+          lng: Number(r.lng),
+          track: r.primary_track,
+          license_status: r.license_status,
+          subsidized: r.is_subsidized_symbol,
+          stop_order: r.has_active_stop_order,
+          sanction: r.has_official_sanction,
+          price_nis: priceSummary?.primary_pin_price_nis ?? null,
+          pin_label: priceSummary?.formatted_pin_label ?? '+ הוסף מחיר',
+          tilde: priceSummary?.pin_requires_tilde ?? false,
+          reports_count: priceSummary?.reports_count ?? 0,
+          trust_tier: priceSummary?.price_trust_tier ?? null,
+          relative_level: priceSummary?.relative_to_city_median ?? 'no_price',
+        }))
+      : undefined;
+
+    return { items, mapPins, totalCount, cityMedianPriceNis };
   }
 
-  async getDaycareDetails(daycareIdOrSymbol: string, schoolYear?: number) {
-    return this.fallbackMemory.getDaycareDetails(daycareIdOrSymbol, schoolYear);
+  async getDaycareDetails(
+    daycareIdOrSymbol: string,
+    schoolYear = getActiveSchoolYear()
+  ): Promise<DaycareDetailDto | null> {
+    const res = await this.roPool.query<{
+      daycare_id: string;
+      external_facility_id: string | null;
+      moe_symbol: string | null;
+      mol_symbol: string | null;
+      display_name: string;
+      official_registry_name: string | null;
+      operator_entity_name: string | null;
+      operator_corp_id: string | null;
+      city_code: number;
+      city_name_he: string;
+      neighborhood_he: string | null;
+      full_address_public: string;
+      is_location_approximated: boolean;
+      lat: number;
+      lng: number;
+      official_phone_public: string | null;
+      official_capacity: number | null;
+      age_groups_supported: DaycareAgeGroup[];
+      primary_track: FrameworkTrack;
+      licensing_regime: LicensingRegime;
+      license_status: DaycareLicenseStatus;
+      is_official_source: boolean;
+      is_subsidized_symbol: boolean;
+      has_active_stop_order: boolean;
+      has_official_sanction: boolean;
+      official_sanction_date: string | null;
+      official_sanction_text: string | null;
+      shelter_status: TriStateStatus;
+      cameras_0_3_status: TriStateStatus;
+      official_last_checked_at: string;
+    }>(
+      `
+      SELECT
+        daycare_id, external_facility_id, moe_symbol, mol_symbol,
+        display_name, official_registry_name, operator_entity_name,
+        operator_corp_id, city_code, city_name_he, neighborhood_he,
+        full_address_public, is_location_approximated,
+        ST_Y(geom) AS lat, ST_X(geom) AS lng,
+        official_phone_public, official_capacity, age_groups_supported,
+        primary_track, licensing_regime, license_status,
+        is_official_source, is_subsidized_symbol, has_active_stop_order,
+        has_official_sanction, official_sanction_date::TEXT,
+        official_sanction_text, shelter_status, cameras_0_3_status,
+        official_last_checked_at::TEXT
+      FROM public.daycares
+      WHERE daycare_id::TEXT = $1
+         OR moe_symbol = $1
+         OR mol_symbol = $1
+         OR external_facility_id = $1
+      LIMIT 1
+      `,
+      [daycareIdOrSymbol]
+    );
+    const d = res.rows[0];
+    if (!d) return null;
+
+    const [extRes, reportsRes, allAggRes, peersRes] = await Promise.all([
+      this.roPool.query<{
+        source_system: string;
+        external_record_id: string;
+        source_license: string;
+        last_synced_at: string;
+      }>(
+        `SELECT source_system, external_record_id, source_license, last_synced_at::TEXT
+         FROM public.daycare_external_sources WHERE daycare_id = $1`,
+        [d.daycare_id]
+      ),
+      this.roPool.query<{
+        submission_id: string;
+        school_year: number;
+        school_year_label: string;
+        source_type: ReportSourceType;
+        monthly_list_price_nis: number;
+        age_group: DaycareAgeGroup;
+        framework_track: FrameworkTrack;
+        hours_sun_thu_start: string | null;
+        hours_sun_thu_end: string | null;
+        is_full_day: boolean;
+        includes_friday: boolean | null;
+        hours_fri_start: string | null;
+        hours_fri_end: string | null;
+        includes_nutrition: boolean | null;
+        reported_size_bucket: SizeBucket;
+        reported_shelter_status: TriStateStatus;
+        reported_cameras_0_3: TriStateStatus;
+      }>(
+        `SELECT * FROM public.daycare_tuition_reports
+         WHERE daycare_id = $1
+         ORDER BY school_year DESC, submission_id DESC`,
+        [d.daycare_id]
+      ),
+      this.roPool.query<{
+        school_year: number;
+        age_group: DaycareAgeGroup;
+        framework_track: FrameworkTrack;
+        is_full_day: boolean;
+        reports_count: number;
+        live_verified_reports_count: number;
+        price_display_mode:
+          | 'single'
+          | 'range_discrepancy'
+          | 'average_close'
+          | 'median_consensus';
+        primary_pin_price_nis: number;
+        min_price_nis: number;
+        max_price_nis: number;
+        median_price_nis: number;
+        p25_price_nis: number;
+        p75_price_nis: number;
+        price_trust_tier:
+          | 'tier_2_parent_consensus'
+          | 'tier_3_unverified_report';
+        last_updated_month: string;
+      }>(
+        `SELECT * FROM public.daycare_price_aggregates
+         WHERE daycare_id = $1
+         ORDER BY school_year ASC`,
+        [d.daycare_id]
+      ),
+      this.roPool.query<{
+        primary_pin_price_nis: number;
+        within_1km: boolean;
+      }>(
+        `
+        SELECT
+          ys.primary_pin_price_nis,
+          ST_DWithin(
+            peer.geom::geography,
+            ST_SetSRID(ST_MakePoint($3, $4), 4326)::geography,
+            1000
+          ) AS within_1km
+        FROM public.daycares peer
+        JOIN public.daycare_year_summary ys
+          ON ys.daycare_id = peer.daycare_id AND ys.school_year = $1
+        WHERE peer.is_official_source = TRUE
+          AND peer.is_active_in_registry = TRUE
+          AND peer.city_code = $2
+          AND peer.primary_track = $5::public.framework_track_enum
+          AND ys.primary_pin_price_nis IS NOT NULL
+        `,
+        [schoolYear, d.city_code, Number(d.lng), Number(d.lat), d.primary_track]
+      ),
+    ]);
+
+    const allYearMatrix = allAggRes.rows.map((a) => ({
+      school_year: a.school_year,
+      school_year_label: formatSchoolYearLabel(a.school_year),
+      age_group: a.age_group,
+      age_group_label_he: AGE_GROUP_LABELS_HE[a.age_group] || a.age_group,
+      framework_track: a.framework_track,
+      is_full_day: a.is_full_day,
+      reports_count: Number(a.reports_count),
+      live_verified_reports_count: Number(a.live_verified_reports_count),
+      price_display_mode: a.price_display_mode,
+      representative_price_nis: a.primary_pin_price_nis,
+      min_price_nis: a.min_price_nis,
+      max_price_nis: a.max_price_nis,
+      median_price_nis: a.median_price_nis,
+      p25_price_nis: a.p25_price_nis,
+      p75_price_nis: a.p75_price_nis,
+      price_trust_tier: a.price_trust_tier,
+      last_updated_month: a.last_updated_month,
+    }));
+
+    const currentYearMatrix = allYearMatrix.filter(
+      (a) => a.school_year === schoolYear
+    );
+
+    // Build YoY history (D-30)
+    const firstPrice = allYearMatrix[0]?.representative_price_nis ?? null;
+    const priceHistoryYoy: DaycareDetailDto['price_history_yoy'] =
+      allYearMatrix.map((curr, idx) => {
+        const prev = idx > 0 ? allYearMatrix[idx - 1] : null;
+        const yoyDiffNis = prev
+          ? curr.representative_price_nis - prev.representative_price_nis
+          : null;
+        const yoyDiffPct =
+          prev && prev.representative_price_nis > 0
+            ? Number(
+                (
+                  ((curr.representative_price_nis -
+                    prev.representative_price_nis) /
+                    prev.representative_price_nis) *
+                  100
+                ).toFixed(1)
+              )
+            : null;
+        const cumDiffNis =
+          idx > 0 && firstPrice !== null
+            ? curr.representative_price_nis - firstPrice
+            : null;
+        const cumDiffPct =
+          idx > 0 && firstPrice && firstPrice > 0
+            ? Number(
+                (
+                  ((curr.representative_price_nis - firstPrice) / firstPrice) *
+                  100
+                ).toFixed(1)
+              )
+            : null;
+
+        return {
+          school_year: curr.school_year,
+          school_year_label: curr.school_year_label,
+          age_group: curr.age_group,
+          is_full_day: curr.is_full_day,
+          representative_price_nis: curr.representative_price_nis,
+          reports_count: curr.reports_count,
+          yoy_diff_nis: yoyDiffNis,
+          yoy_diff_pct: yoyDiffPct,
+          cumulative_diff_nis: cumDiffNis,
+          cumulative_diff_pct: cumDiffPct,
+        };
+      });
+
+    // Benchmarks (D-30, D-38: N >= 3 threshold)
+    const targetPrice = currentYearMatrix[0]?.representative_price_nis ?? null;
+    const cityTrackPrices = peersRes.rows.map((p) =>
+      Number(p.primary_pin_price_nis)
+    );
+    const radiusPrices = peersRes.rows
+      .filter((p) => p.within_1km)
+      .map((p) => Number(p.primary_pin_price_nis));
+
+    const comparisons: DaycareDetailDto['benchmarks']['comparisons'] = [];
+    const addComparison = (
+      scope: 'radius_1km' | 'city_all_same_track' | 'city_similar_params',
+      labelHe: string,
+      prices: number[]
+    ) => {
+      if (prices.length < 3 || targetPrice === null) return;
+      const sorted = [...prices].sort((a, b) => a - b);
+      const med = computePercentile(sorted, 0.5);
+      const p25 = computePercentile(sorted, 0.25);
+      const p75 = computePercentile(sorted, 0.75);
+      const diffNis = targetPrice - med;
+      const diffPct = med > 0 ? Number(((diffNis / med) * 100).toFixed(1)) : 0;
+      comparisons.push({
+        benchmark_scope: scope,
+        label_he: labelHe,
+        sample_daycares_n: sorted.length,
+        median_price_nis: med,
+        p25_price_nis: p25,
+        p75_price_nis: p75,
+        diff_from_median_nis: diffNis,
+        diff_from_median_pct: diffPct,
+      });
+    };
+
+    addComparison(
+      'radius_1km',
+      `גנים ברדיוס 1 ק״מ (${d.neighborhood_he || d.city_name_he})`,
+      radiusPrices
+    );
+    addComparison(
+      'city_all_same_track',
+      `כלל הגנים הפרטיים ב${d.city_name_he}`,
+      cityTrackPrices
+    );
+    addComparison(
+      'city_similar_params',
+      `גנים דומים בעיר (${d.city_name_he} · יום מלא)`,
+      cityTrackPrices
+    );
+
+    const regulatedSymbolBenchmark = 2515;
+    const annualGap =
+      targetPrice !== null
+        ? (targetPrice - regulatedSymbolBenchmark) * 12
+        : null;
+
+    return {
+      daycare: {
+        daycare_id: d.daycare_id,
+        external_facility_id: d.external_facility_id,
+        moe_symbol: d.moe_symbol,
+        mol_symbol: d.mol_symbol,
+        display_name: d.display_name,
+        official_registry_name: d.official_registry_name,
+        operator_entity_name: d.operator_entity_name,
+        operator_corp_id: d.operator_corp_id,
+        city_code: d.city_code,
+        city_name_he: d.city_name_he,
+        neighborhood_he: d.neighborhood_he,
+        full_address_public: d.full_address_public,
+        is_location_approximated: d.is_location_approximated,
+        location: { lat: Number(d.lat), lng: Number(d.lng) },
+        official_phone_public: d.official_phone_public,
+        official_capacity: d.official_capacity,
+        age_groups_supported: d.age_groups_supported,
+        primary_track: d.primary_track,
+        licensing_regime: d.licensing_regime,
+        license_status: d.license_status,
+        is_official_source: d.is_official_source,
+        is_subsidized_symbol: d.is_subsidized_symbol,
+        trust_tier: 'tier_1_official',
+        has_active_stop_order: d.has_active_stop_order,
+        has_official_sanction: d.has_official_sanction,
+        official_sanction_date: d.official_sanction_date,
+        official_sanction_text: d.official_sanction_text,
+        shelter_status: d.shelter_status,
+        cameras_0_3_status: d.cameras_0_3_status,
+        official_last_checked_at: d.official_last_checked_at,
+        regulatory_context_he: buildRegulatoryContextHe({
+          licenseStatus: d.license_status,
+          licensingRegime: d.licensing_regime,
+          isSubsidizedSymbol: d.is_subsidized_symbol,
+          moeSymbol: d.moe_symbol,
+          molSymbol: d.mol_symbol,
+          hasActiveStopOrder: d.has_active_stop_order,
+          hasOfficialSanction: d.has_official_sanction,
+          officialSanctionDate: d.official_sanction_date,
+          officialSanctionText: d.official_sanction_text,
+          officialLastCheckedAt: d.official_last_checked_at,
+        }),
+        external_sources: extRes.rows,
+      },
+      price_matrix_by_age: currentYearMatrix,
+      price_history_yoy: priceHistoryYoy,
+      benchmarks: {
+        target_price_nis: targetPrice,
+        regulated_symbol_benchmark_nis: regulatedSymbolBenchmark,
+        private_vs_regulated_annual_gap_nis: annualGap,
+        comparisons,
+      },
+      individual_reports: reportsRes.rows.map((r) => ({
+        submission_id: r.submission_id,
+        school_year: r.school_year,
+        school_year_label: formatSchoolYearLabel(r.school_year),
+        source_type: r.source_type,
+        source_label_he:
+          r.source_type === 'community_sheet_tlv_seed'
+            ? 'גיליון הורים קהילתי'
+            : 'דיווח הורה מאומת',
+        monthly_list_price_nis: r.monthly_list_price_nis,
+        age_group: r.age_group,
+        framework_track: r.framework_track,
+        hours_sun_thu_start: r.hours_sun_thu_start
+          ? r.hours_sun_thu_start.slice(0, 5)
+          : null,
+        hours_sun_thu_end: r.hours_sun_thu_end
+          ? r.hours_sun_thu_end.slice(0, 5)
+          : null,
+        is_full_day: r.is_full_day,
+        includes_friday: r.includes_friday,
+        hours_fri_start: r.hours_fri_start ? r.hours_fri_start.slice(0, 5) : null,
+        hours_fri_end: r.hours_fri_end ? r.hours_fri_end.slice(0, 5) : null,
+        includes_nutrition: r.includes_nutrition,
+        reported_size_bucket: r.reported_size_bucket,
+        reported_shelter_status: r.reported_shelter_status,
+        reported_cameras_0_3: r.reported_cameras_0_3,
+      })),
+    };
   }
 
   async getAreaPriceStats(params: {
@@ -1723,16 +2370,181 @@ export class PostgresDaycareRepository implements DaycareRepository {
     age_group?: DaycareAgeGroup;
     framework_track?: FrameworkTrack;
     school_year?: number;
-  }) {
-    return this.fallbackMemory.getAreaPriceStats(params);
+  }): Promise<AreaStatsDto> {
+    const yr = params.school_year || getActiveSchoolYear();
+    const track = params.framework_track || 'private_full_day';
+
+    let resolvedCity = BASELINE_ISRAEL_CITIES.find(
+      (c) =>
+        (params.city_code && c.cityCode === params.city_code) ||
+        (params.city_name_he &&
+          normalizeCityName(c.cityNameHe).includes(
+            normalizeCityName(params.city_name_he)
+          ))
+    );
+    const cityCode = params.city_code || resolvedCity?.cityCode || 5000;
+    const cityNameHe =
+      params.city_name_he || resolvedCity?.cityNameHe || 'תל אביב - יפו';
+
+    const countRes = await this.roPool.query<{
+      total_cnt: string;
+      subsidized_cnt: string;
+    }>(
+      `SELECT
+        COUNT(*)::TEXT AS total_cnt,
+        COUNT(*) FILTER (WHERE is_subsidized_symbol)::TEXT AS subsidized_cnt
+       FROM public.daycares
+       WHERE is_official_source = TRUE AND is_active_in_registry = TRUE AND city_code = $1`,
+      [cityCode]
+    );
+    const totalCnt = Number(countRes.rows[0]?.total_cnt || 0);
+    const subCnt = Number(countRes.rows[0]?.subsidized_cnt || 0);
+
+    const priceRes = params.age_group
+      ? await this.roPool.query<{ price: number }>(
+          `
+          SELECT a.primary_pin_price_nis AS price
+          FROM public.daycares d
+          JOIN public.daycare_price_aggregates a
+            ON a.daycare_id = d.daycare_id
+           AND a.school_year = $1
+           AND a.age_group = $4::public.age_group_enum
+          WHERE d.is_official_source = TRUE
+            AND d.is_active_in_registry = TRUE
+            AND d.city_code = $2
+            AND d.primary_track = $3::public.framework_track_enum
+            AND a.primary_pin_price_nis IS NOT NULL
+          `,
+          [yr, cityCode, track, params.age_group]
+        )
+      : await this.roPool.query<{ price: number }>(
+          `
+          SELECT ys.primary_pin_price_nis AS price
+          FROM public.daycares d
+          JOIN public.daycare_year_summary ys
+            ON ys.daycare_id = d.daycare_id AND ys.school_year = $1
+          WHERE d.is_official_source = TRUE
+            AND d.is_active_in_registry = TRUE
+            AND d.city_code = $2
+            AND d.primary_track = $3::public.framework_track_enum
+            AND ys.primary_pin_price_nis IS NOT NULL
+          `,
+          [yr, cityCode, track]
+        );
+
+    const prices = priceRes.rows
+      .map((r) => Number(r.price))
+      .filter(Number.isFinite)
+      .sort((a, b) => a - b);
+
+    const median = prices.length > 0 ? computePercentile(prices, 0.5) : null;
+    const p25 = prices.length > 0 ? computePercentile(prices, 0.25) : null;
+    const p75 = prices.length > 0 ? computePercentile(prices, 0.75) : null;
+    const minP = prices.length > 0 ? prices[0] : null;
+    const maxP = prices.length > 0 ? prices[prices.length - 1] : null;
+
+    const regBenchmark =
+      BASELINE_REGULATED_BENCHMARKS.find(
+        (b) =>
+          b.schoolYear === yr &&
+          b.frameworkTrack ===
+            (track === 'municipal_tzaharon'
+              ? 'municipal_tzaharon'
+              : 'symbol_regulated') &&
+          (params.age_group ? b.ageGroup === params.age_group : b.ageGroup === '1_2')
+      )?.monthlyMaxPriceNis ?? 2515;
+
+    return {
+      city_code: cityCode,
+      city_name_he: cityNameHe,
+      school_year: yr,
+      school_year_label: formatSchoolYearLabel(yr),
+      framework_track: track,
+      age_group: params.age_group || 'all',
+      total_official_daycares: totalCnt,
+      daycares_with_price_reports: prices.length,
+      subsidized_daycares_count: subCnt,
+      private_daycares_count: totalCnt - subCnt,
+      median_price_nis: median,
+      p25_price_nis: p25,
+      p75_price_nis: p75,
+      min_price_nis: minP,
+      max_price_nis: maxP,
+      regulated_benchmark_nis: regBenchmark,
+      annual_gap_vs_regulated_nis:
+        median !== null ? (median - regBenchmark) * 12 : null,
+    };
   }
 
   async autocompleteLocations(params: {
     q: string;
     city_code?: number;
     limit?: number;
-  }) {
-    return this.fallbackMemory.autocompleteLocations(params);
+  }): Promise<AutocompleteLocationDto[]> {
+    const q = params.q.trim();
+    if (q.length < 2) return [];
+    const limit = Math.min(25, Math.max(1, params.limit || 10));
+    const normQ = normalizeCityName(q);
+
+    const results: AutocompleteLocationDto[] = [];
+    for (const c of BASELINE_ISRAEL_CITIES) {
+      if (params.city_code !== undefined && c.cityCode !== params.city_code) {
+        continue;
+      }
+      if (
+        c.cityNameHe.includes(q) ||
+        normalizeCityName(c.cityNameHe).includes(normQ)
+      ) {
+        results.push({
+          kind: 'city',
+          id: `city:${c.cityCode}`,
+          label_he: c.cityNameHe,
+          city_code: c.cityCode,
+          city_name_he: c.cityNameHe,
+          lat: c.lat,
+          lng: c.lng,
+        });
+      }
+    }
+
+    const values: unknown[] = [`%${q}%`];
+    const cityFilter =
+      params.city_code !== undefined
+        ? (values.push(params.city_code), `AND city_code = $${values.length}`)
+        : '';
+    values.push(limit);
+    const limitIdx = `$${values.length}`;
+
+    const res = await this.roPool.query<{
+      daycare_id: string;
+      display_name: string;
+      city_code: number;
+      city_name_he: string;
+      full_address_public: string;
+      lat: number;
+      lng: number;
+    }>(
+      `SELECT daycare_id, display_name, city_code, city_name_he, full_address_public,
+              ST_Y(geom) AS lat, ST_X(geom) AS lng
+       FROM public.daycares
+       WHERE is_official_source = TRUE AND is_active_in_registry = TRUE
+         ${cityFilter}
+         AND (display_name ILIKE $1 OR full_address_public ILIKE $1 OR city_name_he ILIKE $1)
+       LIMIT ${limitIdx}`,
+      values
+    );
+    for (const r of res.rows) {
+      results.push({
+        kind: 'daycare',
+        id: r.daycare_id,
+        label_he: `${r.display_name} (${r.full_address_public})`,
+        city_code: r.city_code,
+        city_name_he: r.city_name_he,
+        lat: Number(r.lat),
+        lng: Number(r.lng),
+      });
+    }
+    return results.slice(0, limit);
   }
 
   async getSanityCheckReferenceMedian(params: {
@@ -1845,7 +2657,14 @@ export class PostgresDaycareRepository implements DaycareRepository {
   }
 
   async listCorrectionRequests(status?: CorrectionRequestRecord['status']) {
-    return this.fallbackMemory.listCorrectionRequests(status);
+    const query = status
+      ? 'SELECT request_id, daycare_id, issue_category, structured_details, status, reported_month FROM app_private.correction_requests WHERE status = $1 ORDER BY reported_month DESC'
+      : 'SELECT request_id, daycare_id, issue_category, structured_details, status, reported_month FROM app_private.correction_requests ORDER BY reported_month DESC';
+    const res = await this.writePool.query<CorrectionRequestRecord>(
+      query,
+      status ? [status] : []
+    );
+    return res.rows;
   }
 
   async resolveCorrectionRequest(params: {
@@ -1853,6 +2672,16 @@ export class PostgresDaycareRepository implements DaycareRepository {
     newStatus: 'resolved' | 'rejected';
     hideSubmissionId?: string;
   }) {
-    return this.fallbackMemory.resolveCorrectionRequest(params);
+    await this.writePool.query(
+      'UPDATE app_private.correction_requests SET status = $1 WHERE request_id = $2::UUID',
+      [params.newStatus, params.requestId]
+    );
+    if (params.hideSubmissionId) {
+      await this.writePool.query(
+        'UPDATE app_private.survey_submissions SET is_flagged_hidden = TRUE WHERE submission_id = $1::UUID',
+        [params.hideSubmissionId]
+      );
+    }
+    return true;
   }
 }

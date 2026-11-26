@@ -1,3 +1,4 @@
+import pg from 'pg';
 import Fastify, { FastifyInstance } from 'fastify';
 import cookie from '@fastify/cookie';
 import cors from '@fastify/cors';
@@ -9,6 +10,7 @@ import { buildMetaEnvelope } from './config/meta-envelope.js';
 import {
   DaycareRepository,
   InMemoryDaycareRepository,
+  PostgresDaycareRepository,
 } from './db/daycare-repository.js';
 import { registerMcpRoutes } from './mcp/mcp-server.js';
 import { registerAuthAndReportsRoutes } from './routes/auth-and-reports-routes.js';
@@ -32,9 +34,20 @@ export async function buildServer(
     ? (options as AppConfig)
     : (options as BuildServerOptions).config || loadConfig();
 
-  const repository: DaycareRepository =
-    (!isConfigOnly && (options as BuildServerOptions).repository) ||
-    new InMemoryDaycareRepository();
+  let managedPools: pg.Pool[] = [];
+  let repository: DaycareRepository;
+  if (!isConfigOnly && (options as BuildServerOptions).repository) {
+    repository = (options as BuildServerOptions).repository!;
+  } else if (config.nodeEnv === 'test') {
+    repository = new InMemoryDaycareRepository();
+  } else {
+    const roPool = new pg.Pool({ connectionString: config.databasePublicRoUrl });
+    const writePool = new pg.Pool({
+      connectionString: config.databaseBackendWriteUrl,
+    });
+    managedPools = [roPool, writePool];
+    repository = new PostgresDaycareRepository(roPool, writePool);
+  }
 
   const verifiers: AuthVerifiers =
     (!isConfigOnly && (options as BuildServerOptions).verifiers) ||
@@ -97,6 +110,12 @@ export async function buildServer(
         return;
       }
       reply.sendFile('index.html');
+    });
+  }
+
+  if (managedPools.length > 0) {
+    app.addHook('onClose', async () => {
+      await Promise.all(managedPools.map((p) => p.end()));
     });
   }
 
